@@ -1,6 +1,6 @@
 import { WebSocket } from 'ws'
 
-const baseUrl = process.env.LOG_SERVER_URL ?? 'ws://localhost:8081/api/logs'
+const baseUrl = process.env.LOG_SERVER_URL ?? 'ws://ws.local/api/logs'
 const rooms = [
   'frontend',
   'backend',

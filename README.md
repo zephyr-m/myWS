@@ -5,13 +5,21 @@
 
 ## Запуск
 
+Один раз настройте локальный домен на NixOS:
+
+```bash
+sudo ./scripts/setup-nixos.sh
+```
+
+Затем запускайте приложение:
+
 ```bash
 docker compose up --build
 ```
 
-Интерфейс: <http://localhost:8081>
+Интерфейс: <http://ws.local>
 
-Демонстрация передачи позиции мыши: <http://localhost:8081/mouse.html>
+Демонстрация передачи позиции мыши: <http://ws.local/mouse.html>
 Комнату можно выбрать параметром, например `mouse.html?room=demo`.
 
 ## Отправка логов
@@ -19,13 +27,13 @@ docker compose up --build
 Подключите приложение к комнате и отправляйте обычные строки:
 
 ```text
-ws://localhost:8081/api/logs?room=backend
+ws://ws.local/api/logs?room=backend
 ```
 
 Пример для браузера или приложения с WebSocket API:
 
 ```js
-const logs = new WebSocket('ws://localhost:8081/api/logs?room=backend')
+const logs = new WebSocket('ws://ws.local/api/logs?room=backend')
 
 logs.addEventListener('open', () => {
   logs.send('Сервер запущен')
