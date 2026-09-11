@@ -1,0 +1,9 @@
+services:
+  live-logs:
+    build: .
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: 8081
+      ROOM_HISTORY_SIZE: 500
+    restart: unless-stopped

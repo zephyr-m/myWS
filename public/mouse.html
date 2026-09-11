@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mouse relay</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; overflow: hidden; font: 14px system-ui, sans-serif; }
+      main { display: flex; height: 100dvh; background: #fafafa; }
+      section { position: relative; flex: 1; display: grid; place-items: center; }
+      section + section { border-left: 1px solid #e5e5e5; }
+      p { color: #737373; pointer-events: none; user-select: none; }
+      #cursor {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 18px;
+        height: 18px;
+        border: 5px solid #171717;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        transition: left 40ms linear, top 40ms linear;
+      }
+      #status { position: fixed; top: 12px; right: 14px; color: #a3a3a3; }
+      #status.online { color: #16a34a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section id="sender"><p>Двигайте мышью здесь</p></section>
+      <section><p>Повтор движения</p><span id="cursor"></span></section>
+    </main>
+    <span id="status">подключение</span>
+
+    <script>
+      const room = new URLSearchParams(location.search).get('room') || 'mouse'
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const sender = document.querySelector('#sender')
+      const cursor = document.querySelector('#cursor')
+      const status = document.querySelector('#status')
+      let outgoing
+      let incoming
+      let nextPosition
+      let frame
+
+      function socketUrl(path) {
+        return `${protocol}//${location.host}${path}`
+      }
+
+      function connectOutgoing() {
+        outgoing = new WebSocket(socketUrl(`/api/logs?room=${encodeURIComponent(room)}`))
+        outgoing.addEventListener('close', () => setTimeout(connectOutgoing, 1000))
+      }
+
+      function connectIncoming() {
+        incoming = new WebSocket(socketUrl('/api/stream'))
+        incoming.addEventListener('open', () => {
+          status.textContent = room
+          status.classList.add('online')
+        })
+        incoming.addEventListener('close', () => {
+          status.textContent = 'переподключение'
+          status.classList.remove('online')
+          setTimeout(connectIncoming, 1000)
+        })
+        incoming.addEventListener('message', ({ data }) => {
+          try {
+            const event = JSON.parse(data)
+            if (event.type !== 'log' || event.payload.room !== room) return
+            const position = JSON.parse(event.payload.message)
+            cursor.style.left = `${Math.min(1, Math.max(0, position.x)) * 100}%`
+            cursor.style.top = `${Math.min(1, Math.max(0, position.y)) * 100}%`
+          } catch {}
+        })
+      }
+
+      sender.addEventListener('pointermove', (event) => {
+        const bounds = sender.getBoundingClientRect()
+        nextPosition = {
+          x: (event.clientX - bounds.left) / bounds.width,
+          y: (event.clientY - bounds.top) / bounds.height,
+        }
+        if (frame) return
+        frame = requestAnimationFrame(() => {
+          if (outgoing?.readyState === WebSocket.OPEN) {
+            outgoing.send(JSON.stringify(nextPosition))
+          }
+          frame = null
+        })
+      })
+
+      connectOutgoing()
+      connectIncoming()
+    </script>
+  </body>
+</html>
