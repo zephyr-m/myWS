@@ -6,4 +6,7 @@ services:
     environment:
       PORT: 8081
       ROOM_HISTORY_SIZE: 500
+      SETTINGS_FILE: /app/data/settings.json
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped

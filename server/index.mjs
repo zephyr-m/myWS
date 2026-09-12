@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
-import { extname, join, resolve, sep } from 'node:path'
+import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket, WebSocketServer } from 'ws'
 
@@ -12,8 +12,12 @@ const historySize = Number.isFinite(configuredHistorySize)
   ? Math.max(1, configuredHistorySize)
   : 500
 const distDirectory = resolve(fileURLToPath(new URL('../dist', import.meta.url)))
+const settingsFile = resolve(
+  process.env.SETTINGS_FILE ?? fileURLToPath(new URL('../data/settings.json', import.meta.url)),
+)
 const roomHistory = new Map()
 const producerCount = new Map()
+let settingsWrite = Promise.resolve()
 
 const viewers = new WebSocketServer({ noServer: true })
 const producers = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
@@ -56,12 +60,91 @@ function snapshot() {
   }
 }
 
+async function readSettingsFile(path = settingsFile) {
+  return JSON.parse(await readFile(path, 'utf8'))
+}
+
+async function loadSettingsState() {
+  try {
+    return { settings: await readSettingsFile(), hasValidPrimary: true }
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return { settings: { version: 1 }, hasValidPrimary: false }
+    }
+    try {
+      return {
+        settings: await readSettingsFile(`${settingsFile}.bak`),
+        hasValidPrimary: false,
+      }
+    } catch {
+      throw error
+    }
+  }
+}
+
+async function readSettings() {
+  return (await loadSettingsState()).settings
+}
+
+function updateSettings(patch) {
+  settingsWrite = settingsWrite.catch(() => undefined).then(async () => {
+    const { settings, hasValidPrimary } = await loadSettingsState()
+    const next = { ...settings, ...patch, version: 1 }
+    const temporaryFile = `${settingsFile}.${process.pid}.tmp`
+
+    await mkdir(dirname(settingsFile), { recursive: true })
+    if (hasValidPrimary) await copyFile(settingsFile, `${settingsFile}.bak`)
+    await writeFile(temporaryFile, `${JSON.stringify(next, null, 2)}\n`)
+    await rename(temporaryFile, settingsFile)
+    return next
+  })
+
+  return settingsWrite
+}
+
+async function readJsonBody(request) {
+  const chunks = []
+  let size = 0
+
+  for await (const chunk of request) {
+    size += chunk.length
+    if (size > 1024 * 1024) throw new Error('Settings payload is too large')
+    chunks.push(chunk)
+  }
+
+  const value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Settings payload must be an object')
+  }
+  return value
+}
+
+function sendJson(response, status, value) {
+  response.writeHead(status, {
+    'cache-control': 'no-store',
+    'content-type': 'application/json; charset=utf-8',
+  })
+  response.end(JSON.stringify(value))
+}
+
 async function serveFile(request, response) {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host}`)
 
   if (requestUrl.pathname === '/api/health') {
-    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
-    response.end(JSON.stringify({ status: 'ok' }))
+    sendJson(response, 200, { status: 'ok' })
+    return
+  }
+
+  if (requestUrl.pathname === '/api/settings') {
+    if (request.method === 'GET') {
+      sendJson(response, 200, await readSettings())
+      return
+    }
+    if (request.method === 'PATCH') {
+      sendJson(response, 200, await updateSettings(await readJsonBody(request)))
+      return
+    }
+    sendJson(response, 405, { error: 'Method not allowed' })
     return
   }
 

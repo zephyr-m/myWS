@@ -14,6 +14,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 COPY server ./server
 COPY --from=build /app/dist ./dist
+RUN mkdir -p /app/data
 
 EXPOSE 8081
 CMD ["npm", "start"]

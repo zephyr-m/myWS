@@ -1,4 +1,5 @@
 import { computed, ref, watch } from 'vue'
+import { loadSettings, saveSettings } from '@/lib/settings-store'
 
 export type RoomSize = 'full' | 'top' | 'bottom'
 export type RoomRow = Exclude<RoomSize, 'full'>
@@ -154,6 +155,8 @@ function loadHierarchy() {
 
 export function useScreens() {
   const contours = ref<LogContour[]>(loadHierarchy())
+  let hydrating = false
+  let localRevision = 0
   const storedActiveContour = localStorage.getItem(activeContourStorageKey)
   const activeContourId = ref(
     contours.value.some((contour) => contour.id === storedActiveContour)
@@ -188,8 +191,44 @@ export function useScreens() {
   localStorage.setItem(hierarchyStorageKey, JSON.stringify(contours.value))
   watch(contours, (value) => {
     localStorage.setItem(hierarchyStorageKey, JSON.stringify(value))
-  }, { deep: true })
-  watch(activeContourId, (value) => localStorage.setItem(activeContourStorageKey, value))
+    if (!hydrating) {
+      localRevision += 1
+      saveSettings({ hierarchy: value })
+    }
+  }, { deep: true, flush: 'sync' })
+  watch(activeContourId, (value) => {
+    localStorage.setItem(activeContourStorageKey, value)
+    if (!hydrating) {
+      localRevision += 1
+      saveSettings({ activeContourId: value })
+    }
+  }, { flush: 'sync' })
+
+  hydrateSettings()
+
+  function hydrateSettings() {
+    const revision = localRevision
+
+    loadSettings().then((settings) => {
+      if (!settings || localRevision !== revision) return
+      if (Array.isArray(settings.hierarchy) && settings.hierarchy.length) {
+        hydrating = true
+        contours.value = normalizeHierarchy(settings.hierarchy as LogContour[])
+        activeContourId.value = settings.activeContourId
+          && contours.value.some((contour) => contour.id === settings.activeContourId)
+          ? settings.activeContourId
+          : contours.value[0].id
+        localStorage.setItem(hierarchyStorageKey, JSON.stringify(contours.value))
+        localStorage.setItem(activeContourStorageKey, activeContourId.value)
+        hydrating = false
+      } else {
+        saveSettings({
+          activeContourId: activeContourId.value,
+          hierarchy: contours.value,
+        })
+      }
+    })
+  }
 
   function findServer(serverId: string) {
     for (const contour of contours.value) {
