@@ -8,6 +8,7 @@ defineProps<{
   rooms: RoomSummary[]
   openRooms: string[]
   unreadByRoom: Record<string, number>
+  canOpenRoom: boolean
 }>()
 
 defineEmits<{
@@ -39,7 +40,7 @@ defineEmits<{
         variant="ghost"
         class="mb-1 h-auto w-full justify-start gap-2 px-2.5 py-2"
         :class="openRooms.includes(room.name) && 'bg-muted'"
-        :disabled="openRooms.length >= 12 && !openRooms.includes(room.name)"
+        :disabled="!canOpenRoom && !openRooms.includes(room.name)"
         @click="$emit('select', room.name)"
       >
         <span class="text-muted-foreground">#</span>

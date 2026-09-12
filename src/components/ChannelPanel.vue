@@ -5,7 +5,9 @@ import type { LogEntry } from '@/types'
 
 defineProps<{
   active: boolean
+  canMakeFull: boolean
   firstUnreadIndex: number
+  half: boolean
   logs: LogEntry[]
   room: string
 }>()
@@ -14,6 +16,7 @@ defineEmits<{
   activate: []
   close: []
   readThrough: [log: LogEntry]
+  toggleSize: []
 }>()
 </script>
 
@@ -24,14 +27,26 @@ defineEmits<{
         <h2 class="truncate text-sm font-semibold"># {{ room }}</h2>
         <p class="text-xs text-muted-foreground">{{ logs.length }} сообщений в памяти</p>
       </div>
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        :aria-label="`Закрыть комнату ${room}`"
-        @click="$emit('close')"
-      >
-        <span class="text-lg leading-none">×</span>
-      </Button>
+      <div class="flex shrink-0 items-center">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          :disabled="half && !canMakeFull"
+          :aria-label="half ? `Развернуть комнату ${room}` : `Уменьшить комнату ${room}`"
+          :title="half && !canMakeFull ? 'Сначала освободите место' : half ? 'На всю высоту' : 'На половину'"
+          @click="$emit('toggleSize')"
+        >
+          <span class="text-xs font-medium leading-none">{{ half ? '↕' : '½' }}</span>
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          :aria-label="`Закрыть комнату ${room}`"
+          @click="$emit('close')"
+        >
+          <span class="text-lg leading-none">×</span>
+        </Button>
+      </div>
       <span v-if="active" class="absolute inset-x-0 bottom-0 h-0.5 bg-sky-500" />
     </header>
 
