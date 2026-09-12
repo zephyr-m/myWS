@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import ChannelPanel from '@/components/ChannelPanel.vue'
+import DocsPage from '@/components/DocsPage.vue'
 import EventSettings from '@/components/EventSettings.vue'
 import RoomList from '@/components/RoomList.vue'
 import ScreenTabs from '@/components/ScreenTabs.vue'
@@ -47,6 +48,7 @@ const {
   selectScreen,
   selectServer,
 } = useScreens()
+const isDocsPage = window.location.pathname === '/docs'
 const isEventsPage = window.location.pathname === '/events'
 
 const fullRooms = computed(() => openRooms.value.filter((room) => room.size === 'full'))
@@ -190,8 +192,10 @@ function selectCurrentScreen(screenId: string) {
 </script>
 
 <template>
+  <DocsPage v-if="isDocsPage" />
+
   <EventSettings
-    v-if="isEventsPage"
+    v-else-if="isEventsPage"
     :connected="connected"
     :contours="contours"
     :rooms="rooms"

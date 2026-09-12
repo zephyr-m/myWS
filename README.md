@@ -18,6 +18,7 @@ docker compose up --build
 ```
 
 Интерфейс: <http://ws.local>
+Примеры подключения: <http://ws.local/docs>
 
 Демонстрация передачи позиции мыши: <http://ws.local/mouse.html>
 Комнату можно выбрать параметром, например `mouse.html?room=demo`.
@@ -43,6 +44,13 @@ logs.addEventListener('open', () => {
     data: { userId: 42 },
   }))
 })
+```
+
+Из PHP и других приложений без WebSocket сообщение можно отправить обычным
+HTTP-запросом. Тело запроса используется как сообщение без преобразований:
+
+```bash
+curl --data-binary 'Сервер запущен' 'http://ws.local/api/logs?room=backend'
 ```
 
 Обычные строки относятся к событию `log`. Найденные события можно включать и

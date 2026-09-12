@@ -60,6 +60,25 @@ function snapshot() {
   }
 }
 
+function appendLog(room, message) {
+  const isNewRoom = !roomHistory.has(room)
+  if (isNewRoom) roomHistory.set(room, [])
+
+  const entry = {
+    id: randomUUID(),
+    room,
+    at: new Date().toISOString(),
+    message,
+  }
+  const history = roomHistory.get(room)
+  history.push(entry)
+  if (history.length > historySize) history.shift()
+
+  if (isNewRoom) broadcastRooms()
+  broadcast({ type: 'log', payload: entry })
+  return entry
+}
+
 async function readSettingsFile(path = settingsFile) {
   return JSON.parse(await readFile(path, 'utf8'))
 }
@@ -102,17 +121,21 @@ function updateSettings(patch) {
   return settingsWrite
 }
 
-async function readJsonBody(request) {
+async function readBody(request) {
   const chunks = []
   let size = 0
 
   for await (const chunk of request) {
     size += chunk.length
-    if (size > 1024 * 1024) throw new Error('Settings payload is too large')
+    if (size > 1024 * 1024) throw new Error('Payload is too large')
     chunks.push(chunk)
   }
 
-  const value = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  return Buffer.concat(chunks)
+}
+
+async function readJsonBody(request) {
+  const value = JSON.parse((await readBody(request)).toString('utf8'))
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Settings payload must be an object')
   }
@@ -145,6 +168,23 @@ async function serveFile(request, response) {
       return
     }
     sendJson(response, 405, { error: 'Method not allowed' })
+    return
+  }
+
+  if (requestUrl.pathname === '/api/logs') {
+    if (request.method !== 'POST') {
+      sendJson(response, 405, { error: 'Method not allowed' })
+      return
+    }
+
+    const room = requestUrl.searchParams.get('room')?.trim().slice(0, 64)
+    if (!room) {
+      sendJson(response, 400, { error: 'Room is required' })
+      return
+    }
+
+    const entry = appendLog(room, (await readBody(request)).toString('utf8'))
+    sendJson(response, 201, { id: entry.id, room: entry.room, at: entry.at })
     return
   }
 
@@ -211,17 +251,7 @@ producers.on('connection', (socket, request) => {
 
   socket.on('message', (data, isBinary) => {
     const message = isBinary ? data.toString('base64') : data.toString()
-    const entry = {
-      id: randomUUID(),
-      room,
-      at: new Date().toISOString(),
-      message,
-    }
-
-    const history = roomHistory.get(room)
-    history.push(entry)
-    if (history.length > historySize) history.shift()
-    broadcast({ type: 'log', payload: entry })
+    appendLog(room, message)
   })
 
   socket.on('close', () => {
@@ -232,5 +262,6 @@ producers.on('connection', (socket, request) => {
 
 server.listen(port, '0.0.0.0', () => {
   console.log(`Live logs is running at http://localhost:${port}`)
+  console.log(`Send logs to http://localhost:${port}/api/logs?room=general`)
   console.log(`Send logs to ws://localhost:${port}/api/logs?room=general`)
 })

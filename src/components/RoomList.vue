@@ -377,11 +377,19 @@ function unreadLabel(count: number) {
       </Button>
     </ScrollArea>
 
-    <a
-      :href="mode === 'events' ? '/' : '/events'"
-      class="m-2 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
-    >
-      {{ mode === 'events' ? '← Панель' : 'Настройка событий' }}
-    </a>
+    <footer class="m-2 grid gap-1">
+      <a
+        :href="mode === 'events' ? '/' : '/events'"
+        class="rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        {{ mode === 'events' ? '← Панель' : 'Настройка событий' }}
+      </a>
+      <a
+        href="/docs"
+        class="rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+      >
+        Документация
+      </a>
+    </footer>
   </aside>
 </template>
