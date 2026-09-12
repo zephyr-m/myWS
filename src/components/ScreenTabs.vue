@@ -13,12 +13,12 @@ defineEmits<{
 </script>
 
 <template>
-  <nav class="flex h-10 shrink-0 overflow-x-auto border-b bg-muted/25" aria-label="Открытые экраны">
+  <nav class="flex h-10 shrink-0 items-end gap-1 overflow-x-auto border-b bg-muted/25 px-1 pt-1" aria-label="Открытые экраны">
     <div
       v-for="screen in screens"
       :key="screen.id"
-      class="group relative flex min-w-28 max-w-52 shrink-0 items-center border-r"
-      :class="activeScreenId === screen.id ? 'bg-background' : 'hover:bg-muted/60'"
+      class="group relative flex min-w-28 max-w-52 shrink-0 items-center rounded-t-md border border-b-0"
+      :class="activeScreenId === screen.id ? 'bg-background' : 'bg-muted/50 hover:bg-muted/80'"
     >
       <button
         type="button"

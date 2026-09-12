@@ -13,10 +13,12 @@ const props = withDefaults(defineProps<{
   canOpenRoom: boolean
   connected: boolean
   contours: LogContour[]
+  eventStatsByRoom?: Record<string, { enabled: number; total: number }>
   mode?: 'dashboard' | 'events'
   rooms: RoomSummary[]
   unreadByRoom: Record<string, number>
 }>(), {
+  eventStatsByRoom: () => ({}),
   mode: 'dashboard',
 })
 
@@ -301,6 +303,12 @@ function unreadLabel(count: number) {
                       <span class="text-muted-foreground">#</span>
                       <span class="min-w-0 flex-1 truncate">{{ room.name }}</span>
                       <span
+                        v-if="mode === 'events'"
+                        class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground"
+                      >
+                        {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
+                      </span>
+                      <span
                         v-if="mode === 'dashboard' && unreadByRoom[room.name]"
                         class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
                       >
@@ -363,6 +371,12 @@ function unreadLabel(count: number) {
       >
         <span class="text-muted-foreground">#</span>
         <span class="min-w-0 flex-1 truncate text-left">{{ room.name }}</span>
+        <span
+          v-if="mode === 'events'"
+          class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground"
+        >
+          {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
+        </span>
         <span
           v-if="mode === 'dashboard' && unreadByRoom[room.name]"
           class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"

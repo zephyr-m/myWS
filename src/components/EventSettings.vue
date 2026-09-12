@@ -24,6 +24,19 @@ const roomNames = computed(() => [...new Set([
   ...props.rooms.map((room) => room.name),
 ])])
 
+const eventStatsByRoom = computed(() => Object.fromEntries(
+  roomNames.value.map((room) => {
+    const roomEvents = [...new Set(
+      (props.logsByRoom[room] ?? []).map((log) => parseLogMessage(log.message).event),
+    )]
+
+    return [room, {
+      enabled: roomEvents.filter((event) => props.isEventEnabled(room, event)).length,
+      total: roomEvents.length,
+    }]
+  }),
+))
+
 watch(roomNames, (rooms) => {
   if (!rooms.includes(selectedRoom.value)) selectedRoom.value = rooms[0] ?? ''
 }, { immediate: true })
@@ -83,6 +96,7 @@ function setAll(enabled: boolean) {
       :can-open-room="true"
       :connected="connected"
       :contours="contours"
+      :event-stats-by-room="eventStatsByRoom"
       mode="events"
       :rooms="rooms"
       :unread-by-room="noUnread"
