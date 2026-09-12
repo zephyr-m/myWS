@@ -5,7 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import type { LogContour, LogScreen, LogServer } from '@/composables/useScreens'
 import type { RoomSummary } from '@/types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   activeContourId: string
   activeRoom: string | null
   activeScreenId: string
@@ -13,9 +13,12 @@ const props = defineProps<{
   canOpenRoom: boolean
   connected: boolean
   contours: LogContour[]
+  mode?: 'dashboard' | 'events'
   rooms: RoomSummary[]
   unreadByRoom: Record<string, number>
-}>()
+}>(), {
+  mode: 'dashboard',
+})
 
 defineEmits<{
   createContour: []
@@ -110,7 +113,9 @@ function unreadLabel(count: number) {
         class="size-2 rounded-full"
         :class="connected ? 'bg-emerald-500' : 'bg-muted-foreground/40'"
       />
-      <span class="truncate text-sm font-semibold">Live logs</span>
+      <span class="truncate text-sm font-semibold">
+        {{ mode === 'events' ? 'Настройка событий' : 'Live logs' }}
+      </span>
     </header>
 
     <ScrollArea class="min-h-0 flex-1 px-2 pb-3">
@@ -120,6 +125,7 @@ function unreadLabel(count: number) {
             Контуры
           </p>
           <button
+            v-if="mode === 'dashboard'"
             type="button"
             class="grid size-6 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
             title="Новый контур"
@@ -150,12 +156,13 @@ function unreadLabel(count: number) {
               {{ contour.name }}
             </button>
             <span
-              v-if="contourUnread(contour)"
+              v-if="mode === 'dashboard' && contourUnread(contour)"
               class="mr-1 rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
             >
               {{ unreadLabel(contourUnread(contour)) }}
             </span>
             <button
+              v-if="mode === 'dashboard'"
               type="button"
               class="hidden size-6 shrink-0 place-items-center text-xs text-muted-foreground hover:text-foreground group-hover/contour:grid"
               title="Переименовать контур"
@@ -164,7 +171,7 @@ function unreadLabel(count: number) {
               ✎
             </button>
             <button
-              v-if="contours.length > 1"
+              v-if="mode === 'dashboard' && contours.length > 1"
               type="button"
               class="mr-1 hidden size-6 shrink-0 place-items-center text-sm text-muted-foreground hover:text-destructive group-hover/contour:grid"
               title="Удалить контур"
@@ -201,12 +208,13 @@ function unreadLabel(count: number) {
                   title="Есть подключенные комнаты"
                 />
                 <span
-                  v-if="serverUnread(server)"
+                  v-if="mode === 'dashboard' && serverUnread(server)"
                   class="mr-1 rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
                 >
                   {{ unreadLabel(serverUnread(server)) }}
                 </span>
                 <button
+                  v-if="mode === 'dashboard'"
                   type="button"
                   class="hidden size-6 shrink-0 place-items-center text-xs text-muted-foreground hover:text-foreground group-hover/server:grid"
                   title="Переименовать сервер"
@@ -215,7 +223,7 @@ function unreadLabel(count: number) {
                   ✎
                 </button>
                 <button
-                  v-if="contour.servers.length > 1"
+                  v-if="mode === 'dashboard' && contour.servers.length > 1"
                   type="button"
                   class="mr-1 hidden size-6 shrink-0 place-items-center text-sm text-muted-foreground hover:text-destructive group-hover/server:grid"
                   title="Удалить сервер"
@@ -247,13 +255,13 @@ function unreadLabel(count: number) {
                       {{ screen.name }}
                     </button>
                     <span
-                      v-if="screenUnread(screen)"
+                      v-if="mode === 'dashboard' && screenUnread(screen)"
                       class="mr-1 rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
                     >
                       {{ unreadLabel(screenUnread(screen)) }}
                     </span>
                     <button
-                      v-if="screen.id !== 'main'"
+                      v-if="mode === 'dashboard' && screen.id !== 'main'"
                       type="button"
                       class="hidden size-6 shrink-0 place-items-center text-xs text-muted-foreground hover:text-foreground group-hover/screen:grid"
                       title="Переименовать экран"
@@ -262,7 +270,7 @@ function unreadLabel(count: number) {
                       ✎
                     </button>
                     <button
-                      v-if="screen.id !== 'main'"
+                      v-if="mode === 'dashboard' && screen.id !== 'main'"
                       type="button"
                       class="mr-1 hidden size-6 shrink-0 place-items-center text-sm text-muted-foreground hover:text-destructive group-hover/screen:grid"
                       title="Удалить экран"
@@ -293,7 +301,7 @@ function unreadLabel(count: number) {
                       <span class="text-muted-foreground">#</span>
                       <span class="min-w-0 flex-1 truncate">{{ room.name }}</span>
                       <span
-                        v-if="unreadByRoom[room.name]"
+                        v-if="mode === 'dashboard' && unreadByRoom[room.name]"
                         class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
                       >
                         {{ unreadLabel(unreadByRoom[room.name]) }}
@@ -307,6 +315,7 @@ function unreadLabel(count: number) {
                 </div>
 
                 <button
+                  v-if="mode === 'dashboard'"
                   type="button"
                   class="ml-2 flex items-center gap-1 px-2 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
                   @click="$emit('createScreen', server)"
@@ -317,6 +326,7 @@ function unreadLabel(count: number) {
             </div>
 
             <button
+              v-if="mode === 'dashboard'"
               type="button"
               class="ml-2 flex items-center gap-1 px-2 py-1.5 text-[11px] text-muted-foreground hover:text-foreground"
               @click="$emit('createServer', contour)"
@@ -348,13 +358,13 @@ function unreadLabel(count: number) {
         :key="room.name"
         variant="ghost"
         class="mb-1 h-auto w-full justify-start gap-2 px-2.5 py-2"
-        :disabled="!canOpenRoom"
+        :disabled="mode === 'dashboard' && !canOpenRoom"
         @click="$emit('select', room.name)"
       >
         <span class="text-muted-foreground">#</span>
         <span class="min-w-0 flex-1 truncate text-left">{{ room.name }}</span>
         <span
-          v-if="unreadByRoom[room.name]"
+          v-if="mode === 'dashboard' && unreadByRoom[room.name]"
           class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
         >
           {{ unreadLabel(unreadByRoom[room.name]) }}
@@ -368,10 +378,10 @@ function unreadLabel(count: number) {
     </ScrollArea>
 
     <a
-      href="/events"
+      :href="mode === 'events' ? '/' : '/events'"
       class="m-2 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
     >
-      Настройка событий
+      {{ mode === 'events' ? '← Панель' : 'Настройка событий' }}
     </a>
   </aside>
 </template>

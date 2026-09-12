@@ -192,6 +192,8 @@ function selectCurrentScreen(screenId: string) {
 <template>
   <EventSettings
     v-if="isEventsPage"
+    :connected="connected"
+    :contours="contours"
     :rooms="rooms"
     :logs-by-room="logsByRoom"
     :is-event-enabled="isEventEnabled"
