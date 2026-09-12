@@ -7,6 +7,7 @@ defineProps<{
   connected: boolean
   rooms: RoomSummary[]
   openRooms: string[]
+  unreadByRoom: Record<string, number>
 }>()
 
 defineEmits<{
@@ -44,11 +45,24 @@ defineEmits<{
         <span class="text-muted-foreground">#</span>
         <span class="min-w-0 flex-1 truncate text-left">{{ room.name }}</span>
         <span
+          v-if="unreadByRoom[room.name]"
+          class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+        >
+          {{ unreadByRoom[room.name] > 99 ? '99+' : unreadByRoom[room.name] }}
+        </span>
+        <span
           v-if="room.producers > 0"
           class="size-1.5 shrink-0 rounded-full bg-emerald-500"
           :title="`${room.producers} подключено`"
         />
       </Button>
     </ScrollArea>
+
+    <a
+      href="/events"
+      class="m-2 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+    >
+      Настройка событий
+    </a>
   </aside>
 </template>

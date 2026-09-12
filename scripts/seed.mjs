@@ -21,9 +21,9 @@ function fillRoom(room) {
     const socket = new WebSocket(`${baseUrl}?room=${encodeURIComponent(room)}`)
 
     socket.once('open', () => {
-      socket.send(`[${room}] Первое тестовое сообщение`)
-      socket.send(`[${room}] Второе тестовое сообщение`)
-      socket.send(`[${room}] Третье тестовое сообщение`, (error) => {
+      socket.send(JSON.stringify({ event: 'request.received', message: `[${room}] Получен запрос` }))
+      socket.send(JSON.stringify({ event: 'database.query', message: `[${room}] Выполнен запрос к БД` }))
+      socket.send(JSON.stringify({ event: 'response.sent', message: `[${room}] Отправлен ответ` }), (error) => {
         if (error) return reject(error)
         setTimeout(() => socket.close(), 100)
       })
