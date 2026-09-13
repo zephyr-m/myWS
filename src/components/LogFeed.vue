@@ -22,6 +22,7 @@ const copiedLogId = ref<string | null>(null)
 const unreadCount = computed(() => props.logs.length - props.firstUnreadIndex)
 let positioning = false
 let readingArmed = false
+let initialPositionDone = false
 let copyResetTimer: number | undefined
 
 watch(() => props.active, (active) => {
@@ -30,8 +31,20 @@ watch(() => props.active, (active) => {
 
 onMounted(async () => {
   await nextTick()
-  positionAtUnread()
+  positionInitialHistory()
 })
+
+watch(() => props.logs.length, async (length) => {
+  if (!length || initialPositionDone) return
+  await nextTick()
+  positionInitialHistory()
+})
+
+function positionInitialHistory() {
+  if (!viewport.value || !props.logs.length || initialPositionDone) return
+  initialPositionDone = true
+  positionAtUnread()
+}
 
 function positionAtUnread(smooth = false) {
   if (!viewport.value) return
