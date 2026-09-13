@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { Check, Copy, Zap } from '@lucide/vue'
+import JsonTree from '@/components/JsonTree.vue'
 import { parseLogMessage } from '@/lib/log-events'
 import type { LogEntry } from '@/types'
 
@@ -16,9 +18,11 @@ const emit = defineEmits<{
 }>()
 
 const viewport = ref<HTMLElement | null>(null)
+const copiedLogId = ref<string | null>(null)
 const unreadCount = computed(() => props.logs.length - props.firstUnreadIndex)
 let positioning = false
 let readingArmed = false
+let copyResetTimer: number | undefined
 
 watch(() => props.active, (active) => {
   if (!active) readingArmed = false
@@ -76,6 +80,49 @@ function displayTime(timestamp: string) {
     second: '2-digit',
   }).format(new Date(timestamp))
 }
+
+async function copyMessage(log: LogEntry) {
+  await navigator.clipboard.writeText(parseLogMessage(log.message).message)
+  copiedLogId.value = log.id
+  window.clearTimeout(copyResetTimer)
+  copyResetTimer = window.setTimeout(() => {
+    copiedLogId.value = null
+  }, 1_500)
+}
+
+onUnmounted(() => window.clearTimeout(copyResetTimer))
+
+const structuredMessageCache = new WeakMap<LogEntry, ReturnType<typeof parseStructuredMessage>>()
+
+function structuredMessage(log: LogEntry) {
+  let content = structuredMessageCache.get(log)
+  if (!content) {
+    content = parseStructuredMessage(log.message)
+    structuredMessageCache.set(log, content)
+  }
+  return content
+}
+
+function parseStructuredMessage(rawMessage: string) {
+  const message = parseLogMessage(rawMessage).message
+  const lines = message.split('\n')
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const json = lines.slice(index).join('\n').trim()
+    if (!json.startsWith('{') && !json.startsWith('[')) continue
+
+    try {
+      return {
+        json: JSON.parse(json) as unknown,
+        text: lines.slice(0, index).join('\n').trimEnd(),
+      }
+    } catch {
+      // Keep looking for a valid JSON suffix.
+    }
+  }
+
+  return { json: undefined, text: message }
+}
 </script>
 
 <template>
@@ -124,13 +171,30 @@ function displayTime(timestamp: string) {
             :class="index >= firstUnreadIndex ? 'border-sky-500' : 'border-transparent'"
           >
             <div
-              class="min-w-0 max-w-[90%] rounded-2xl rounded-bl-sm px-3.5 py-2.5"
+              class="relative min-w-0 max-w-[90%] rounded-2xl rounded-bl-sm px-3.5 py-2.5 pr-9"
               :class="index >= firstUnreadIndex ? 'bg-sky-500/10' : 'bg-muted'"
             >
-              <span class="mb-1 block truncate font-mono text-[10px] text-muted-foreground">
-                {{ parseLogMessage(log.message).event }}
+              <button
+                type="button"
+                class="absolute right-2 top-2 grid size-6 place-items-center rounded text-muted-foreground opacity-60 hover:bg-background/60 hover:text-foreground hover:opacity-100"
+                :title="copiedLogId === log.id ? 'Скопировано' : 'Скопировать сообщение'"
+                @click.stop="copyMessage(log)"
+              >
+                <Check v-if="copiedLogId === log.id" class="size-3.5 text-emerald-500" />
+                <Copy v-else class="size-3.5" />
+              </button>
+              <span class="mb-1.5 flex min-w-0 items-center gap-1 font-mono text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+                <Zap class="size-3 shrink-0" />
+                <span class="truncate">{{ parseLogMessage(log.message).event }}</span>
               </span>
-              <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-5">{{ parseLogMessage(log.message).message }}</pre>
+              <template v-for="content in [structuredMessage(log)]" :key="log.id">
+                <pre v-if="content.text" class="whitespace-pre-wrap break-words font-mono text-xs leading-5">{{ content.text }}</pre>
+                <JsonTree
+                  v-if="content.json !== undefined"
+                  class="mt-2 font-mono text-xs"
+                  :value="content.json"
+                />
+              </template>
             </div>
             <time class="mb-1 shrink-0 text-[10px] text-muted-foreground">
               {{ displayTime(log.at) }}

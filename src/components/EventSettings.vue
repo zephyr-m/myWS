@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import EventToggle from '@/components/EventToggle.vue'
 import RoomList from '@/components/RoomList.vue'
 import { Separator } from '@/components/ui/separator'
 import type { LogContour } from '@/composables/useScreens'
@@ -12,10 +13,13 @@ const props = defineProps<{
   rooms: RoomSummary[]
   logsByRoom: Record<string, LogEntry[]>
   isEventEnabled: (room: string, event: string) => boolean
+  isNotificationEnabled: (room: string, event: string) => boolean
   toggleEvent: (room: string, event: string) => void
+  toggleNotification: (room: string, event: string) => void
 }>()
 
-const selectedRoom = ref('')
+let requestedRoom = new URLSearchParams(window.location.search).get('room') ?? ''
+const selectedRoom = ref(requestedRoom)
 const noUnread: Record<string, number> = {}
 const roomNames = computed(() => [...new Set([
   ...props.contours.flatMap((contour) => contour.servers.flatMap((server) =>
@@ -32,12 +36,18 @@ const eventStatsByRoom = computed(() => Object.fromEntries(
 
     return [room, {
       enabled: roomEvents.filter((event) => props.isEventEnabled(room, event)).length,
+      notifications: roomEvents.filter((event) => props.isNotificationEnabled(room, event)).length,
       total: roomEvents.length,
     }]
   }),
 ))
 
 watch(roomNames, (rooms) => {
+  if (requestedRoom && rooms.includes(requestedRoom)) {
+    selectedRoom.value = requestedRoom
+    requestedRoom = ''
+    return
+  }
   if (!rooms.includes(selectedRoom.value)) selectedRoom.value = rooms[0] ?? ''
 }, { immediate: true })
 
@@ -77,11 +87,27 @@ function selectTreeRoom(_serverId: string, _screenId: string, room: string) {
   selectedRoom.value = room
 }
 
-function setAll(enabled: boolean) {
+type FilterKind = 'messages' | 'notifications'
+
+function isEnabled(kind: FilterKind, event: string) {
+  return kind === 'messages'
+    ? props.isEventEnabled(selectedRoom.value, event)
+    : props.isNotificationEnabled(selectedRoom.value, event)
+}
+
+function toggleFilter(kind: FilterKind, event: string) {
+  if (kind === 'messages') props.toggleEvent(selectedRoom.value, event)
+  else props.toggleNotification(selectedRoom.value, event)
+}
+
+function allEnabled(kind: FilterKind) {
+  return events.value.every((event) => isEnabled(kind, event))
+}
+
+function toggleAll(kind: FilterKind) {
+  const enabled = !allEnabled(kind)
   for (const event of events.value) {
-    if (props.isEventEnabled(selectedRoom.value, event) !== enabled) {
-      props.toggleEvent(selectedRoom.value, event)
-    }
+    if (isEnabled(kind, event) !== enabled) toggleFilter(kind, event)
   }
 }
 </script>
@@ -121,16 +147,16 @@ function setAll(enabled: boolean) {
           <button
             type="button"
             class="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-            @click="setAll(true)"
+            @click="toggleAll('messages')"
           >
-            Включить все
+            {{ allEnabled('messages') ? 'Скрыть всю ленту' : 'Показать всю ленту' }}
           </button>
           <button
             type="button"
             class="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-            @click="setAll(false)"
+            @click="toggleAll('notifications')"
           >
-            Выключить все
+            {{ allEnabled('notifications') ? 'Отключить все Push' : 'Включить все Push' }}
           </button>
         </div>
       </header>
@@ -145,30 +171,34 @@ function setAll(enabled: boolean) {
           </p>
 
           <div v-else class="overflow-hidden rounded-lg border">
-            <button
+            <div class="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center border-b bg-muted/30 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <span>Событие</span>
+              <span class="text-center">Лента</span>
+              <span class="text-center">Push</span>
+            </div>
+            <div
               v-for="event in events"
               :key="event"
-              type="button"
-              role="switch"
-              :aria-checked="isEventEnabled(selectedRoom, event)"
-              class="flex w-full items-center justify-between gap-4 border-b px-4 py-3 text-left last:border-b-0 hover:bg-muted/50"
-              @click="toggleEvent(selectedRoom, event)"
+              class="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
             >
               <span class="truncate font-mono text-sm">{{ event }}</span>
-              <span
-                class="relative h-5 w-9 shrink-0 rounded-full transition-colors"
-                :class="isEventEnabled(selectedRoom, event) ? 'bg-primary' : 'bg-muted-foreground/30'"
-              >
-                <span
-                  class="absolute top-0.5 size-4 rounded-full bg-background shadow-sm transition-transform"
-                  :class="isEventEnabled(selectedRoom, event) ? 'translate-x-[18px]' : 'translate-x-0.5'"
-                />
-              </span>
-            </button>
+              <EventToggle
+                class="justify-self-center"
+                :checked="isEventEnabled(selectedRoom, event)"
+                :label="`Показывать ${event} в ленте`"
+                @toggle="toggleEvent(selectedRoom, event)"
+              />
+              <EventToggle
+                class="justify-self-center"
+                :checked="isNotificationEnabled(selectedRoom, event)"
+                :label="`Push для ${event}`"
+                @toggle="toggleNotification(selectedRoom, event)"
+              />
+            </div>
           </div>
 
           <p v-if="selectedRoom" class="mt-4 text-xs text-muted-foreground">
-            Новые события включаются автоматически.
+            Новые события автоматически включаются в ленте и Push.
           </p>
         </section>
       </main>

@@ -171,6 +171,32 @@ async function serveFile(request, response) {
     return
   }
 
+  if (requestUrl.pathname === '/api/rooms') {
+    if (request.method !== 'DELETE') {
+      sendJson(response, 405, { error: 'Method not allowed' })
+      return
+    }
+
+    const room = requestUrl.searchParams.get('room')?.trim().slice(0, 64)
+    if (!room) {
+      sendJson(response, 400, { error: 'Room is required' })
+      return
+    }
+    if ((producerCount.get(room) ?? 0) > 0) {
+      sendJson(response, 409, { error: 'Room has an active producer' })
+      return
+    }
+    if (!roomHistory.delete(room)) {
+      sendJson(response, 404, { error: 'Room not found' })
+      return
+    }
+
+    producerCount.delete(room)
+    broadcastRooms()
+    sendJson(response, 200, { room })
+    return
+  }
+
   if (requestUrl.pathname === '/api/logs') {
     if (request.method !== 'POST') {
       sendJson(response, 405, { error: 'Method not allowed' })

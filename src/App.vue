@@ -51,6 +51,7 @@ function notifyAboutLog(log: LogEntry) {
 
   if ('Notification' in window && Notification.permission === 'granted') {
     const message = parseLogMessage(log.message)
+    if (!isNotificationEnabled(log.room, message.event)) return
     const notification = new Notification(`# ${log.room} · ${message.event}`, {
       body: message.message,
       silent: true,
@@ -68,8 +69,8 @@ if (!isDocsPage && !isEventsPage) {
   window.addEventListener('keydown', enableNotificationSound)
 }
 
-const { connected, logsByRoom, rooms } = useLogStream(notifyAboutLog)
-const { isEventEnabled, toggleEvent } = useEventFilters()
+const { isEventEnabled, isNotificationEnabled, toggleEvent, toggleNotification } = useEventFilters()
+const { connected, deleteRoom: deleteRoomFromPool, logsByRoom, rooms } = useLogStream(notifyAboutLog)
 const { firstUnreadIndex, markReadThrough } = useReadState()
 const {
   activeContourId,
@@ -162,6 +163,14 @@ function closeRoom(room: string) {
   if (activeRoom.value === room) activeRoom.value = null
 }
 
+async function deleteFreeRoom(room: string) {
+  if (!window.confirm(`Удалить свободную комнату «${room}» и её сообщения?`)) return
+
+  await deleteRoomFromPool(room).catch((error: unknown) => {
+    window.alert(error instanceof Error ? error.message : 'Не удалось удалить комнату')
+  })
+}
+
 function canMakeFull(room: OpenRoom) {
   if (room.size === 'full') return true
   const topCount = topRooms.value.length - Number(room.size === 'top')
@@ -244,7 +253,9 @@ function selectCurrentScreen(screenId: string) {
     :rooms="rooms"
     :logs-by-room="logsByRoom"
     :is-event-enabled="isEventEnabled"
+    :is-notification-enabled="isNotificationEnabled"
     :toggle-event="toggleEvent"
+    :toggle-notification="toggleNotification"
   />
 
   <div v-else class="flex h-dvh overflow-hidden bg-background text-foreground">
@@ -262,6 +273,7 @@ function selectCurrentScreen(screenId: string) {
       @create-screen="createScreen"
       @create-server="createServer"
       @delete-contour="removeContour"
+      @delete-room="deleteFreeRoom"
       @delete-screen="removeScreen"
       @delete-server="removeServer"
       @rename-contour="editContour"

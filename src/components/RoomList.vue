@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Settings, Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { LogContour, LogScreen, LogServer } from '@/composables/useScreens'
@@ -13,7 +14,7 @@ const props = withDefaults(defineProps<{
   canOpenRoom: boolean
   connected: boolean
   contours: LogContour[]
-  eventStatsByRoom?: Record<string, { enabled: number; total: number }>
+  eventStatsByRoom?: Record<string, { enabled: number; notifications: number; total: number }>
   mode?: 'dashboard' | 'events'
   rooms: RoomSummary[]
   unreadByRoom: Record<string, number>
@@ -27,6 +28,7 @@ defineEmits<{
   createScreen: [server: LogServer]
   createServer: [contour: LogContour]
   deleteContour: [contour: LogContour]
+  deleteRoom: [room: string]
   deleteScreen: [server: LogServer, screen: LogScreen]
   deleteServer: [server: LogServer]
   renameContour: [contour: LogContour]
@@ -42,6 +44,10 @@ defineEmits<{
 const expandedContours = ref<Set<string>>(new Set())
 const expandedServers = ref<Set<string>>(new Set())
 const expandedScreens = ref<Set<string>>(new Set())
+const sidebarWidth = ref(Math.min(640, Math.max(
+  208,
+  Number(localStorage.getItem('live-logs.sidebar-width')) || (window.innerWidth >= 640 ? 288 : 208),
+)))
 const roomByName = computed(() => new Map(props.rooms.map((room) => [room.name, room])))
 const assignedRoomNames = computed(() => new Set(
   props.contours.flatMap((contour) => contour.servers.flatMap((server) =>
@@ -106,10 +112,40 @@ function serverOnline(server: LogServer) {
 function unreadLabel(count: number) {
   return count > 99 ? '99+' : count
 }
+
+function eventSettingsUrl(room: string) {
+  return `/events?room=${encodeURIComponent(room)}`
+}
+
+function startResize(event: PointerEvent) {
+  const handle = event.currentTarget as HTMLElement
+  const startX = event.clientX
+  const startWidth = sidebarWidth.value
+
+  handle.setPointerCapture(event.pointerId)
+  handle.onpointermove = (moveEvent) => {
+    sidebarWidth.value = Math.min(640, Math.max(208, startWidth + moveEvent.clientX - startX))
+  }
+  handle.onpointerup = () => {
+    handle.onpointermove = null
+    handle.onpointerup = null
+    localStorage.setItem('live-logs.sidebar-width', String(sidebarWidth.value))
+  }
+}
 </script>
 
 <template>
-  <aside class="flex w-52 shrink-0 flex-col bg-muted/25 sm:w-72">
+  <aside
+    class="relative flex shrink-0 flex-col bg-muted/25"
+    :style="{ width: `${sidebarWidth}px` }"
+  >
+    <div
+      class="group absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize touch-none"
+      title="Изменить ширину меню"
+      @pointerdown="startResize"
+    >
+      <span class="mx-auto block h-full w-px bg-transparent group-hover:bg-sky-500/60" />
+    </div>
     <header class="flex h-16 shrink-0 items-center gap-2 px-4">
       <span
         class="size-2 rounded-full"
@@ -292,33 +328,46 @@ function unreadLabel(count: number) {
                     >
                       Нет комнат
                     </p>
-                    <button
+                    <div
                       v-for="room in screen.rooms"
                       :key="room.name"
-                      type="button"
-                      class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                      class="group/room flex w-full items-center rounded hover:bg-muted"
                       :class="activeServerId === server.id && activeScreenId === screen.id && activeRoom === room.name && 'bg-muted'"
-                      @click="$emit('selectScreenRoom', server.id, screen.id, room.name)"
                     >
-                      <span class="text-muted-foreground">#</span>
-                      <span class="min-w-0 flex-1 truncate">{{ room.name }}</span>
-                      <span
-                        v-if="mode === 'events'"
-                        class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground"
+                      <button
+                        type="button"
+                        class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-xs"
+                        @click="$emit('selectScreenRoom', server.id, screen.id, room.name)"
                       >
-                        {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
-                      </span>
-                      <span
-                        v-if="mode === 'dashboard' && unreadByRoom[room.name]"
-                        class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
+                        <span class="text-muted-foreground">#</span>
+                        <span class="min-w-0 flex-1 truncate">{{ room.name }}</span>
+                        <span
+                          v-if="mode === 'events'"
+                          class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground"
+                        >
+                          {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
+                          · 🔔 {{ eventStatsByRoom[room.name]?.notifications ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
+                        </span>
+                        <span
+                          v-if="mode === 'dashboard' && unreadByRoom[room.name]"
+                          class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
+                        >
+                          {{ unreadLabel(unreadByRoom[room.name]) }}
+                        </span>
+                        <span
+                          v-if="(roomByName.get(room.name)?.producers ?? 0) > 0"
+                          class="size-1.5 shrink-0 rounded-full bg-emerald-500"
+                        />
+                      </button>
+                      <a
+                        v-if="mode === 'dashboard'"
+                        :href="eventSettingsUrl(room.name)"
+                        class="mr-1 grid size-6 shrink-0 place-items-center rounded text-muted-foreground opacity-60 hover:bg-background hover:text-foreground hover:opacity-100"
+                        :title="`Настроить события комнаты ${room.name}`"
                       >
-                        {{ unreadLabel(unreadByRoom[room.name]) }}
-                      </span>
-                      <span
-                        v-if="(roomByName.get(room.name)?.producers ?? 0) > 0"
-                        class="size-1.5 shrink-0 rounded-full bg-emerald-500"
-                      />
-                    </button>
+                        <Settings class="size-3.5" />
+                      </a>
+                    </div>
                   </div>
                 </div>
 
@@ -361,34 +410,57 @@ function unreadLabel(count: number) {
         Все комнаты распределены по экранам.
       </p>
 
-      <Button
+      <div
         v-for="room in availableRooms"
         :key="room.name"
-        variant="ghost"
-        class="mb-1 h-auto w-full justify-start gap-2 px-2.5 py-2"
-        :disabled="mode === 'dashboard' && !canOpenRoom"
-        @click="$emit('select', room.name)"
+        class="group/room mb-1 flex w-full items-center rounded-md hover:bg-accent hover:text-accent-foreground"
       >
-        <span class="text-muted-foreground">#</span>
-        <span class="min-w-0 flex-1 truncate text-left">{{ room.name }}</span>
-        <span
-          v-if="mode === 'events'"
-          class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground"
+        <Button
+          variant="ghost"
+          class="h-auto min-w-0 flex-1 justify-start gap-2 px-2.5 py-2 hover:bg-transparent"
+          :disabled="mode === 'dashboard' && !canOpenRoom"
+          @click="$emit('select', room.name)"
         >
-          {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
-        </span>
-        <span
-          v-if="mode === 'dashboard' && unreadByRoom[room.name]"
-          class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+          <span class="text-muted-foreground">#</span>
+          <span class="min-w-0 flex-1 truncate text-left">{{ room.name }}</span>
+          <span
+            v-if="mode === 'events'"
+            class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground"
+          >
+            {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
+            · 🔔 {{ eventStatsByRoom[room.name]?.notifications ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
+          </span>
+          <span
+            v-if="mode === 'dashboard' && unreadByRoom[room.name]"
+            class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white"
+          >
+            {{ unreadLabel(unreadByRoom[room.name]) }}
+          </span>
+          <span
+            v-if="room.producers > 0"
+            class="size-1.5 shrink-0 rounded-full bg-emerald-500"
+            :title="`${room.producers} подключено`"
+          />
+        </Button>
+        <a
+          v-if="mode === 'dashboard'"
+          :href="eventSettingsUrl(room.name)"
+          class="mr-1 grid size-7 shrink-0 place-items-center rounded text-muted-foreground opacity-60 hover:bg-background hover:text-foreground hover:opacity-100"
+          :title="`Настроить события комнаты ${room.name}`"
         >
-          {{ unreadLabel(unreadByRoom[room.name]) }}
-        </span>
-        <span
-          v-if="room.producers > 0"
-          class="size-1.5 shrink-0 rounded-full bg-emerald-500"
-          :title="`${room.producers} подключено`"
-        />
-      </Button>
+          <Settings class="size-3.5" />
+        </a>
+        <button
+          v-if="mode === 'dashboard'"
+          type="button"
+          class="mr-1 grid size-7 shrink-0 place-items-center rounded text-muted-foreground opacity-60 hover:bg-background hover:text-destructive hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-20"
+          :disabled="room.producers > 0"
+          :title="room.producers > 0 ? 'Сначала отключите отправителя' : `Удалить комнату ${room.name}`"
+          @click="$emit('deleteRoom', room.name)"
+        >
+          <Trash2 class="size-3.5" />
+        </button>
+      </div>
     </ScrollArea>
 
     <footer class="m-2 grid gap-1">

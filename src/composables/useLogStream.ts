@@ -31,6 +31,10 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
 
     if (event.type === 'rooms') {
       rooms.value = event.payload
+      const roomNames = new Set(event.payload.map((room) => room.name))
+      for (const room of Object.keys(logsByRoom)) {
+        if (!roomNames.has(room)) delete logsByRoom[room]
+      }
       return
     }
 
@@ -64,6 +68,16 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
     socket.addEventListener('error', () => socket?.close())
   }
 
+  async function deleteRoom(room: string) {
+    const response = await fetch(`/api/rooms?room=${encodeURIComponent(room)}`, {
+      method: 'DELETE',
+    })
+    if (response.ok) return
+    throw new Error(response.status === 409
+      ? 'Нельзя удалить комнату: к ней подключён клиент'
+      : 'Не удалось удалить комнату')
+  }
+
   onMounted(connect)
   onUnmounted(() => {
     stopped = true
@@ -71,5 +85,5 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
     socket?.close()
   })
 
-  return { connected, logsByRoom, rooms }
+  return { connected, deleteRoom, logsByRoom, rooms }
 }
