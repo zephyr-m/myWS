@@ -22,7 +22,53 @@ import type {
   RoomSize,
 } from '@/composables/useScreens'
 
-const { connected, logsByRoom, rooms } = useLogStream()
+const isDocsPage = window.location.pathname === '/docs'
+const isEventsPage = window.location.pathname === '/events'
+let notificationAudio: AudioContext | null = null
+
+function enableNotificationSound() {
+  notificationAudio ??= new AudioContext()
+  void notificationAudio.resume()
+  if ('Notification' in window && Notification.permission === 'default') {
+    void Notification.requestPermission()
+  }
+  window.removeEventListener('pointerdown', enableNotificationSound)
+  window.removeEventListener('keydown', enableNotificationSound)
+}
+
+function notifyAboutLog(log: LogEntry) {
+  if (notificationAudio?.state === 'running') {
+    const oscillator = notificationAudio.createOscillator()
+    const gain = notificationAudio.createGain()
+    oscillator.frequency.setValueAtTime(720, notificationAudio.currentTime)
+    oscillator.frequency.exponentialRampToValueAtTime(960, notificationAudio.currentTime + 0.09)
+    gain.gain.setValueAtTime(0.06, notificationAudio.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, notificationAudio.currentTime + 0.14)
+    oscillator.connect(gain).connect(notificationAudio.destination)
+    oscillator.start()
+    oscillator.stop(notificationAudio.currentTime + 0.14)
+  }
+
+  if ('Notification' in window && Notification.permission === 'granted') {
+    const message = parseLogMessage(log.message)
+    const notification = new Notification(`# ${log.room} · ${message.event}`, {
+      body: message.message,
+      silent: true,
+      tag: log.id,
+    })
+    notification.addEventListener('click', () => {
+      window.focus()
+      notification.close()
+    })
+  }
+}
+
+if (!isDocsPage && !isEventsPage) {
+  window.addEventListener('pointerdown', enableNotificationSound)
+  window.addEventListener('keydown', enableNotificationSound)
+}
+
+const { connected, logsByRoom, rooms } = useLogStream(notifyAboutLog)
 const { isEventEnabled, toggleEvent } = useEventFilters()
 const { firstUnreadIndex, markReadThrough } = useReadState()
 const {
@@ -48,9 +94,6 @@ const {
   selectScreen,
   selectServer,
 } = useScreens()
-const isDocsPage = window.location.pathname === '/docs'
-const isEventsPage = window.location.pathname === '/events'
-
 const fullRooms = computed(() => openRooms.value.filter((room) => room.size === 'full'))
 const topRooms = computed(() => openRooms.value
   .filter((room) => room.size === 'top')

@@ -3,7 +3,7 @@ import type { LogEntry, RoomSummary, StreamEvent } from '@/types'
 
 const reconnectDelay = 1_500
 
-export function useLogStream() {
+export function useLogStream(onLog?: (log: LogEntry) => void) {
   const connected = ref(false)
   const rooms = ref<RoomSummary[]>([])
   const logsByRoom = reactive<Record<string, LogEntry[]>>({})
@@ -37,6 +37,7 @@ export function useLogStream() {
     const roomLogs = logsByRoom[event.payload.room] ?? []
     roomLogs.push(event.payload)
     logsByRoom[event.payload.room] = roomLogs
+    onLog?.(event.payload)
   }
 
   function connect() {
