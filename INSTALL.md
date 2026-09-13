@@ -22,6 +22,14 @@ sudo ./scripts/setup-nixos.sh
 
 После настройки откройте <http://ws.local>.
 
+## Временный публичный адрес
+
+```bash
+nix-shell -p cloudflared --run 'cloudflared tunnel --url http://127.0.0.1:8081'
+```
+
+Адрес `trycloudflare.com` действует, пока команда продолжает работать.
+
 ## Управление
 
 ```bash
