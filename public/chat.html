@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live chat</title>
+    <style>
+      :root { color: #18181b; background: #f4f4f5; font: 14px/1.4 system-ui, sans-serif; }
+      * { box-sizing: border-box; }
+      body { margin: 0; }
+      button, input { font: inherit; }
+      .chat { display: flex; width: min(100%, 800px); height: 100dvh; margin: auto; flex-direction: column; background: #fff; border-inline: 1px solid #e4e4e7; }
+      header { display: flex; height: 64px; flex: none; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid #e4e4e7; }
+      .heading { display: flex; align-items: center; gap: 10px; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: #a1a1aa; }
+      .dot.online { background: #10b981; }
+      h1 { margin: 0; font-size: 14px; }
+      .room, .status, .empty, time { color: #71717a; font-size: 12px; }
+      .messages { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 12px; overflow-y: scroll; padding: 20px; scrollbar-color: #a1a1aa #f4f4f5; scrollbar-width: auto; }
+      .messages::-webkit-scrollbar { width: 10px; }
+      .messages::-webkit-scrollbar-track { background: #f4f4f5; }
+      .messages::-webkit-scrollbar-thumb { background: #a1a1aa; border: 2px solid #f4f4f5; border-radius: 999px; }
+      .empty { margin: auto; text-align: center; }
+      .message { display: flex; max-width: 78%; align-self: flex-start; align-items: flex-end; gap: 8px; }
+      .message.own { align-self: flex-end; flex-direction: row-reverse; }
+      .content { display: grid; min-width: 0; gap: 3px; }
+      .avatar { display: grid; width: 32px; height: 32px; flex: none; place-items: center; border: 1px solid #e4e4e7; border-radius: 50%; background: #fff; font-size: 18px; }
+      .meta { display: flex; align-items: center; gap: 8px; padding-inline: 4px; }
+      .own .meta { justify-content: flex-end; }
+      .name { font-size: 11px; font-weight: 600; }
+      .bubble { padding: 9px 12px; overflow-wrap: anywhere; border: 1px solid #e4e4e7; border-radius: 10px; background: #f4f4f5; white-space: pre-wrap; }
+      .own .bubble { border-color: #bae6fd; background: #e0f2fe; }
+      .composer { display: flex; flex: none; gap: 8px; padding: 12px; border-top: 1px solid #e4e4e7; }
+      .composer input, .join input { min-width: 0; flex: 1; padding: 10px 12px; color: #18181b; background: #fff; border: 1px solid #e4e4e7; border-radius: 7px; outline: none; }
+      input:focus { border-color: #0ea5e9; box-shadow: 0 0 0 2px #e0f2fe; }
+      button { padding: 9px 14px; color: #fff; background: #0ea5e9; border: 0; border-radius: 7px; cursor: pointer; }
+      button:disabled { cursor: default; opacity: .45; }
+      .overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(24 24 27 / .35); }
+      .join { display: grid; width: min(100%, 360px); gap: 16px; padding: 22px; background: #fff; border: 1px solid #e4e4e7; border-radius: 12px; box-shadow: 0 20px 50px rgb(0 0 0 / .15); }
+      .join h2, .join p { margin: 0; }
+      .join h2 { font-size: 16px; }
+      .join p { color: #71717a; font-size: 12px; }
+      .hidden { display: none; }
+      @media (max-width: 800px) { .chat { border: 0; } }
+    </style>
+  </head>
+  <body>
+    <main class="chat">
+      <header>
+        <div class="heading">
+          <span id="dot" class="dot"></span>
+          <div><h1>Live chat</h1><div id="room" class="room"></div></div>
+        </div>
+        <span id="status" class="status">Отключено</span>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite">
+        <p id="empty" class="empty">Пока нет сообщений</p>
+      </section>
+
+      <form id="composer" class="composer">
+        <input id="message" maxlength="2000" autocomplete="off" placeholder="Сообщение" disabled />
+        <button id="send" type="submit" disabled>Отправить</button>
+      </form>
+    </main>
+
+    <div id="overlay" class="overlay">
+      <form id="join" class="join">
+        <div><h2>Войти в общий чат</h2><p>Имя видно другим участникам</p></div>
+        <input id="name" maxlength="32" autocomplete="nickname" placeholder="Ваше имя" autofocus required />
+        <button type="submit">Войти</button>
+      </form>
+    </div>
+
+    <script>
+      const room = new URLSearchParams(location.search).get('room')?.trim() || 'general'
+      const socketOrigin = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}`
+      const clientId = crypto.randomUUID?.() || Math.random().toString(36).slice(2)
+      const avatars = [
+        '🐶', '🐱', '🐭', '🐹', '🐰', '🦊', '🐻', '🐼', '🐨', '🐯',
+        '🦁', '🐮', '🐷', '🐸', '🐵', '🐧', '🐦', '🐤', '🦄', '🐝',
+        '🐙', '🦋', '🦖', '🐲', '🤖', '👾', '👻', '👽', '💀', '🎃',
+        '🍕', '🍔', '🍩', '🍉', '🥑', '🚀', '🌚', '⚡', '🔥', '💎',
+      ]
+      const elements = Object.fromEntries(
+        ['dot', 'status', 'room', 'messages', 'empty', 'composer', 'message', 'send', 'overlay', 'join', 'name']
+          .map((id) => [id, document.getElementById(id)]),
+      )
+      const seen = new Set()
+      let displayName = ''
+      let producer
+      let viewer
+      let audio
+      let avatar = '🙂'
+
+      elements.room.textContent = `# ${room}`
+
+      function updateConnection() {
+        const online = producer?.readyState === WebSocket.OPEN && viewer?.readyState === WebSocket.OPEN
+        elements.dot.classList.toggle('online', online)
+        elements.status.textContent = online ? 'Подключено' : 'Подключение…'
+        elements.message.disabled = !online
+        elements.send.disabled = !online
+      }
+
+      function parseMessage(entry) {
+        try {
+          const value = JSON.parse(entry.message)
+          if (value?.event !== 'chat.message' || typeof value.message !== 'string') return null
+          return {
+            text: value.message,
+            name: value.data?.name || 'Без имени',
+            avatar: value.data?.avatar || '🙂',
+            clientId: value.data?.clientId,
+          }
+        } catch { return null }
+      }
+
+      function playSound() {
+        if (!audio) return
+        const oscillator = audio.createOscillator()
+        const gain = audio.createGain()
+        oscillator.frequency.setValueAtTime(720, audio.currentTime)
+        oscillator.frequency.exponentialRampToValueAtTime(960, audio.currentTime + .09)
+        gain.gain.setValueAtTime(.08, audio.currentTime)
+        gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + .14)
+        oscillator.connect(gain).connect(audio.destination)
+        oscillator.start()
+        oscillator.stop(audio.currentTime + .14)
+      }
+
+      function addMessage(entry, notify = false) {
+        if (seen.has(entry.id)) return
+        const message = parseMessage(entry)
+        if (!message) return
+        seen.add(entry.id)
+        elements.empty.classList.add('hidden')
+
+        const article = document.createElement('article')
+        article.className = `message${message.clientId === clientId ? ' own' : ''}`
+        const avatarElement = document.createElement('span')
+        avatarElement.className = 'avatar'
+        avatarElement.textContent = message.avatar
+        const content = document.createElement('div')
+        content.className = 'content'
+        const meta = document.createElement('div')
+        meta.className = 'meta'
+        const author = document.createElement('span')
+        author.className = 'name'
+        author.textContent = message.name
+        const time = document.createElement('time')
+        time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        const bubble = document.createElement('div')
+        bubble.className = 'bubble'
+        bubble.textContent = message.text
+        meta.append(author, time)
+        content.append(meta, bubble)
+        article.append(avatarElement, content)
+        elements.messages.append(article)
+        elements.messages.scrollTop = elements.messages.scrollHeight
+        if (notify && message.clientId !== clientId) playSound()
+      }
+
+      function handleStream(event) {
+        const packet = JSON.parse(event.data)
+        if (packet.type === 'snapshot') {
+          elements.messages.replaceChildren(elements.empty)
+          elements.empty.classList.remove('hidden')
+          seen.clear()
+          for (const entry of packet.payload.logs[room] || []) addMessage(entry)
+        }
+        if (packet.type === 'log' && packet.payload.room === room) addMessage(packet.payload, true)
+      }
+
+      function connect() {
+        connectProducer()
+        connectViewer()
+      }
+
+      function connectProducer() {
+        producer = new WebSocket(`${socketOrigin}/api/logs?room=${encodeURIComponent(room)}`)
+        producer.addEventListener('open', updateConnection)
+        producer.addEventListener('close', () => { updateConnection(); setTimeout(connectProducer, 1500) })
+      }
+
+      function connectViewer() {
+        viewer = new WebSocket(`${socketOrigin}/api/stream`)
+        viewer.addEventListener('open', updateConnection)
+        viewer.addEventListener('message', handleStream)
+        viewer.addEventListener('close', () => { updateConnection(); setTimeout(connectViewer, 1500) })
+      }
+
+      elements.join.addEventListener('submit', (event) => {
+        event.preventDefault()
+        displayName = elements.name.value.trim()
+        if (!displayName) return
+        avatar = avatars[Math.floor(Math.random() * avatars.length)]
+        audio = new (window.AudioContext || window.webkitAudioContext)()
+        elements.overlay.classList.add('hidden')
+        connect()
+        elements.message.focus()
+      })
+
+      elements.composer.addEventListener('submit', (event) => {
+        event.preventDefault()
+        const text = elements.message.value.trim()
+        if (!text || producer?.readyState !== WebSocket.OPEN) return
+        producer.send(JSON.stringify({
+          event: 'chat.message',
+          message: text,
+          data: { name: displayName, avatar, clientId },
+        }))
+        elements.message.value = ''
+      })
+    </script>
+  </body>
+</html>
