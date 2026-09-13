@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Settings, Trash2 } from '@lucide/vue'
+import { Bug, Settings, Trash2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { LogContour, LogScreen, LogServer } from '@/composables/useScreens'
@@ -147,13 +147,14 @@ function startResize(event: PointerEvent) {
       <span class="mx-auto block h-full w-px bg-transparent group-hover:bg-sky-500/60" />
     </div>
     <header class="flex h-16 shrink-0 items-center gap-2 px-4">
+      <Bug class="size-4 shrink-0 text-sky-500" />
+      <span class="min-w-0 flex-1 truncate text-sm font-semibold">
+        {{ mode === 'events' ? 'Настройка событий' : 'Live Debug' }}
+      </span>
       <span
-        class="size-2 rounded-full"
+        class="size-2 shrink-0 rounded-full"
         :class="connected ? 'bg-emerald-500' : 'bg-muted-foreground/40'"
       />
-      <span class="truncate text-sm font-semibold">
-        {{ mode === 'events' ? 'Настройка событий' : 'Live logs' }}
-      </span>
     </header>
 
     <ScrollArea class="min-h-0 flex-1 px-2 pb-3">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 defineProps<{
   checked: boolean
+  disabled?: boolean
   label: string
 }>()
 
@@ -13,7 +14,8 @@ defineEmits<{ toggle: [] }>()
     role="switch"
     :aria-checked="checked"
     :aria-label="label"
-    class="inline-flex items-center justify-center rounded p-1"
+    :disabled="disabled"
+    class="inline-flex items-center justify-center rounded p-1 disabled:cursor-not-allowed disabled:opacity-40"
     @click="$emit('toggle')"
   >
     <span

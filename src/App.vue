@@ -69,7 +69,14 @@ if (!isDocsPage && !isEventsPage) {
   window.addEventListener('keydown', enableNotificationSound)
 }
 
-const { isEventEnabled, isNotificationEnabled, toggleEvent, toggleNotification } = useEventFilters()
+const {
+  isEventEnabled,
+  isNotificationEnabled,
+  isRoomNotificationEnabled,
+  toggleEvent,
+  toggleNotification,
+  toggleRoomNotifications,
+} = useEventFilters()
 const { connected, deleteRoom: deleteRoomFromPool, logsByRoom, rooms } = useLogStream(notifyAboutLog)
 const { firstUnreadIndex, markReadThrough } = useReadState()
 const {
@@ -254,8 +261,10 @@ function selectCurrentScreen(screenId: string) {
     :logs-by-room="logsByRoom"
     :is-event-enabled="isEventEnabled"
     :is-notification-enabled="isNotificationEnabled"
+    :is-room-notification-enabled="isRoomNotificationEnabled"
     :toggle-event="toggleEvent"
     :toggle-notification="toggleNotification"
+    :toggle-room-notifications="toggleRoomNotifications"
   />
 
   <div v-else class="flex h-dvh overflow-hidden bg-background text-foreground">

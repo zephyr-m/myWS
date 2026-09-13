@@ -14,8 +14,10 @@ const props = defineProps<{
   logsByRoom: Record<string, LogEntry[]>
   isEventEnabled: (room: string, event: string) => boolean
   isNotificationEnabled: (room: string, event: string) => boolean
+  isRoomNotificationEnabled: (room: string) => boolean
   toggleEvent: (room: string, event: string) => void
   toggleNotification: (room: string, event: string) => void
+  toggleRoomNotifications: (room: string) => void
 }>()
 
 let requestedRoom = new URLSearchParams(window.location.search).get('room') ?? ''
@@ -87,27 +89,16 @@ function selectTreeRoom(_serverId: string, _screenId: string, room: string) {
   selectedRoom.value = room
 }
 
-type FilterKind = 'messages' | 'notifications'
-
-function isEnabled(kind: FilterKind, event: string) {
-  return kind === 'messages'
-    ? props.isEventEnabled(selectedRoom.value, event)
-    : props.isNotificationEnabled(selectedRoom.value, event)
+function allEventsEnabled() {
+  return events.value.every((event) => props.isEventEnabled(selectedRoom.value, event))
 }
 
-function toggleFilter(kind: FilterKind, event: string) {
-  if (kind === 'messages') props.toggleEvent(selectedRoom.value, event)
-  else props.toggleNotification(selectedRoom.value, event)
-}
-
-function allEnabled(kind: FilterKind) {
-  return events.value.every((event) => isEnabled(kind, event))
-}
-
-function toggleAll(kind: FilterKind) {
-  const enabled = !allEnabled(kind)
+function toggleAllEvents() {
+  const enabled = !allEventsEnabled()
   for (const event of events.value) {
-    if (isEnabled(kind, event) !== enabled) toggleFilter(kind, event)
+    if (props.isEventEnabled(selectedRoom.value, event) !== enabled) {
+      props.toggleEvent(selectedRoom.value, event)
+    }
   }
 }
 </script>
@@ -143,20 +134,21 @@ function toggleAll(kind: FilterKind) {
           </p>
         </div>
 
-        <div v-if="events.length" class="flex items-center gap-2">
+        <div v-if="selectedRoom" class="flex items-center gap-2">
           <button
+            v-if="events.length"
             type="button"
             class="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-            @click="toggleAll('messages')"
+            @click="toggleAllEvents"
           >
-            {{ allEnabled('messages') ? 'Скрыть всю ленту' : 'Показать всю ленту' }}
+            {{ allEventsEnabled() ? 'Скрыть всю ленту' : 'Показать всю ленту' }}
           </button>
           <button
             type="button"
             class="rounded-md px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-            @click="toggleAll('notifications')"
+            @click="toggleRoomNotifications(selectedRoom)"
           >
-            {{ allEnabled('notifications') ? 'Отключить все Push' : 'Включить все Push' }}
+            {{ isRoomNotificationEnabled(selectedRoom) ? 'Отключить Push комнаты' : 'Включить Push комнаты' }}
           </button>
         </div>
       </header>
@@ -191,6 +183,7 @@ function toggleAll(kind: FilterKind) {
               <EventToggle
                 class="justify-self-center"
                 :checked="isNotificationEnabled(selectedRoom, event)"
+                :disabled="!isRoomNotificationEnabled(selectedRoom)"
                 :label="`Push для ${event}`"
                 @toggle="toggleNotification(selectedRoom, event)"
               />
@@ -198,7 +191,7 @@ function toggleAll(kind: FilterKind) {
           </div>
 
           <p v-if="selectedRoom" class="mt-4 text-xs text-muted-foreground">
-            Новые события автоматически включаются в ленте и Push.
+            Новые события включаются автоматически, если Push комнаты не отключён.
           </p>
         </section>
       </main>

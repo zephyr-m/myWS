@@ -2,6 +2,7 @@ export interface ServerSettings {
   activeContourId?: string
   eventFilters?: Record<string, string[]>
   hierarchy?: unknown
+  mutedNotificationRooms?: string[]
   notificationFilters?: Record<string, string[]>
   readState?: Record<string, { id: string, at: string }>
   updatedAt?: string
