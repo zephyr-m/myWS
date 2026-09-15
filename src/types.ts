@@ -1,4 +1,9 @@
 export interface LogEntry {
+  sourceRoom?: string
+  count?: number
+  firstAt?: string
+  times?: string[]
+  sequence?: number
   id: string
   room: string
   at: string
@@ -20,4 +25,4 @@ export type StreamEvent =
     }
   | { type: 'rooms'; payload: RoomSummary[] }
   | { type: 'clear'; payload: { room: string } }
-  | { type: 'log'; payload: LogEntry }
+  | { type: 'log' | 'update'; payload: LogEntry }

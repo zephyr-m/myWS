@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useEventRoutes } from '@/composables/useEventRoutes'
 import EventToggle from '@/components/EventToggle.vue'
 import RoomList from '@/components/RoomList.vue'
 import { Separator } from '@/components/ui/separator'
@@ -20,6 +21,8 @@ const props = defineProps<{
   toggleRoomNotifications: (room: string) => void
 }>()
 
+const { routes, busy, error, loaded, setRoute } = useEventRoutes()
+
 let requestedRoom = new URLSearchParams(window.location.search).get('room') ?? ''
 const selectedRoom = ref(requestedRoom)
 const noUnread: Record<string, number> = {}
@@ -28,13 +31,34 @@ const roomNames = computed(() => [...new Set([
     server.rooms,
   )),
   ...props.rooms.map((room) => room.name),
+  ...routes.value.flatMap((rule) => [rule.source, rule.target]),
 ])])
+
+const listedRooms = computed(() => roomNames.value.map((name) =>
+  props.rooms.find((room) => room.name === name) ?? { name, producers: 0 }))
+
+function eventRows(room: string) {
+  const rows = new Map<string, { source: string; event: string }>()
+  const add = (source: string, event: string) => rows.set(JSON.stringify([source, event]), { source, event })
+  for (const log of props.logsByRoom[room] ?? []) add(log.sourceRoom ?? room, parseLogMessage(log.message).event)
+  for (const rule of routes.value) {
+    if (rule.source === room || rule.target === room) add(rule.source, rule.event)
+  }
+  return [...rows.values()].sort((a, b) => a.event.localeCompare(b.event) || a.source.localeCompare(b.source))
+}
+const rows = computed(() => eventRows(selectedRoom.value))
+function targetFor(source: string, event: string) {
+  return routes.value.find((rule) => rule.source === source && rule.event === event)?.target ?? ''
+}
+async function changeTarget(select: Event, source: string, event: string) {
+  const input = select.target as HTMLSelectElement
+  await setRoute(source, event, input.value || null)
+  input.value = targetFor(source, event)
+}
 
 const eventStatsByRoom = computed(() => Object.fromEntries(
   roomNames.value.map((room) => {
-    const roomEvents = [...new Set(
-      (props.logsByRoom[room] ?? []).map((log) => parseLogMessage(log.message).event),
-    )]
+    const roomEvents = [...new Set(eventRows(room).map((row) => row.event))]
 
     return [room, {
       enabled: roomEvents.filter((event) => props.isEventEnabled(room, event)).length,
@@ -80,13 +104,7 @@ const selectedLocation = computed(() => {
   }
 })
 
-const events = computed(() => [
-  ...new Set(
-    (props.logsByRoom[selectedRoom.value] ?? []).map(
-      (log) => parseLogMessage(log.message).event,
-    ),
-  ),
-].sort())
+const events = computed(() => [...new Set(rows.value.map((row) => row.event))])
 
 function selectTreeRoom(_serverId: string, _screenId: string, room: string) {
   selectedRoom.value = room
@@ -118,7 +136,7 @@ function toggleAllEvents() {
       :contours="contours"
       :event-stats-by-room="eventStatsByRoom"
       mode="events"
-      :rooms="rooms"
+      :rooms="listedRooms"
       :unread-by-room="noUnread"
       @select="selectedRoom = $event"
       @select-screen-room="selectTreeRoom"
@@ -157,7 +175,7 @@ function toggleAllEvents() {
       </header>
 
       <main class="min-h-0 flex-1 overflow-y-auto p-5">
-        <section class="mx-auto max-w-2xl">
+        <section class="mx-auto max-w-6xl">
           <p v-if="!selectedRoom" class="py-12 text-center text-sm text-muted-foreground">
             Пока нет комнат
           </p>
@@ -165,34 +183,54 @@ function toggleAllEvents() {
             В этой комнате пока нет событий
           </p>
 
-          <div v-else class="overflow-hidden rounded-lg border">
-            <div class="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center border-b bg-muted/30 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <div v-else class="overflow-x-auto rounded-lg border">
+            <div class="grid min-w-[760px] grid-cols-[minmax(10rem,1fr)_10rem_16rem_5rem_5rem] gap-2 items-center border-b bg-muted/30 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               <span>Событие</span>
+              <span>Исходная комната</span>
+              <span>Целевая комната</span>
               <span class="text-center">Лента</span>
               <span class="text-center">Push</span>
             </div>
             <div
-              v-for="event in events"
-              :key="event"
-              class="grid grid-cols-[minmax(0,1fr)_5rem_5rem] items-center border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
+              v-for="row in rows"
+              :key="JSON.stringify([row.source, row.event])"
+              class="grid min-w-[760px] grid-cols-[minmax(10rem,1fr)_10rem_16rem_5rem_5rem] gap-2 items-center border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
             >
-              <span class="truncate font-mono text-sm">{{ event }}</span>
+              <span class="truncate font-mono text-sm">{{ row.event }}</span>
+              <span class="truncate text-xs text-muted-foreground" :title="row.source">{{ row.source }}</span>
+              <div class="flex min-w-0 items-center gap-1">
+                <select class="min-w-0 flex-1 rounded border bg-background px-2 py-1.5 text-xs"
+                  :value="targetFor(row.source, row.event)" :disabled="busy || !loaded"
+                  :aria-label="`Целевая комната для ${row.event} из ${row.source}`"
+                  @change="changeTarget($event, row.source, row.event)">
+                  <option value="">Без перенаправления</option>
+                  <option v-for="room in roomNames.filter((name) => name !== row.source)" :key="room" :value="room">{{ room }}</option>
+                </select>
+                <button type="button" class="size-7 shrink-0 rounded hover:bg-muted disabled:opacity-30"
+                  :disabled="busy || !loaded || !targetFor(row.source, row.event)" title="Сбросить перенаправление"
+                  :aria-label="`Сбросить маршрут ${row.event} из ${row.source}`"
+                  @click="setRoute(row.source, row.event, null)">↺</button>
+              </div>
               <EventToggle
                 class="justify-self-center"
-                :checked="isEventEnabled(selectedRoom, event)"
-                :label="`Показывать ${event} в ленте`"
-                @toggle="toggleEvent(selectedRoom, event)"
+                :checked="isEventEnabled(selectedRoom, row.event)"
+                :label="`Показывать ${row.event} в ленте`"
+                @toggle="toggleEvent(selectedRoom, row.event)"
               />
               <EventToggle
                 class="justify-self-center"
-                :checked="isNotificationEnabled(selectedRoom, event)"
+                :checked="isNotificationEnabled(selectedRoom, row.event)"
                 :disabled="!isRoomNotificationEnabled(selectedRoom)"
-                :label="`Push для ${event}`"
-                @toggle="toggleNotification(selectedRoom, event)"
+                :label="`Push для ${row.event}`"
+                @toggle="toggleNotification(selectedRoom, row.event)"
               />
             </div>
           </div>
 
+          <p v-if="error" role="alert" class="mt-3 text-sm text-destructive">{{ error }}</p>
+          <p v-if="selectedRoom" class="mt-3 text-xs text-muted-foreground">
+            Маршрут применяется к новым сообщениям один раз. Лента и Push относятся к выбранной комнате.
+          </p>
           <p v-if="selectedRoom" class="mt-4 text-xs text-muted-foreground">
             Новые события включаются автоматически, если Push комнаты не отключён.
           </p>

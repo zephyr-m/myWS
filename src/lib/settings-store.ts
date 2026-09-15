@@ -4,7 +4,7 @@ export interface ServerSettings {
   hierarchy?: unknown
   mutedNotificationRooms?: string[]
   notificationFilters?: Record<string, string[]>
-  readState?: Record<string, { id: string, at: string }>
+  readState?: Record<string, { id: string, at: string, sequence?: number }>
   updatedAt?: string
   version?: number
 }

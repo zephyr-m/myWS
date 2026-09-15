@@ -200,6 +200,13 @@ function parseStructuredMessage(rawMessage: string) {
                 <Zap class="size-3 shrink-0" />
                 <span class="truncate">{{ parseLogMessage(log.message).event }}</span>
               </span>
+              <details v-if="(log.count ?? 1) > 1" class="mb-2 text-xs text-muted-foreground">
+                <summary class="cursor-pointer text-sky-600">×{{ log.count }} · Последние {{ log.times?.length ?? 0 }} получений</summary>
+                <p v-if="log.firstAt" class="mt-1">Первое: {{ new Date(log.firstAt).toLocaleString('ru') }}</p>
+                <ol class="mt-1 list-inside list-decimal">
+                  <li v-for="(at, timeIndex) in log.times" :key="timeIndex">{{ new Date(at).toLocaleString('ru') }}.{{ at.slice(20, 23) }}</li>
+                </ol>
+              </details>
               <template v-for="content in [structuredMessage(log)]" :key="log.id">
                 <pre v-if="content.text" class="whitespace-pre-wrap break-words font-mono text-xs leading-5">{{ content.text }}</pre>
                 <JsonTree

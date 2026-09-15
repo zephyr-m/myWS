@@ -27,6 +27,8 @@ const roomHistory = new Map()
 const producerCount = new Map()
 let historyWrite = Promise.resolve()
 let settingsWrite = Promise.resolve()
+let sequence = 0
+let eventRoutes = []
 
 const viewers = new WebSocketServer({ noServer: true })
 const producers = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
@@ -69,7 +71,8 @@ function enqueueHistoryWrite(task) {
 }
 
 function persistHistoryEntry(entry) {
-  void enqueueHistoryWrite(() => appendFile(historyFile, `${JSON.stringify(entry)}\n`))
+  const line = `${JSON.stringify(entry)}\n`
+  void enqueueHistoryWrite(() => appendFile(historyFile, line))
 }
 
 function compactHistory() {
@@ -92,17 +95,23 @@ async function loadHistory() {
 
   try {
     const contents = await readFile(historyFile, 'utf8')
+    const latest = new Map()
     for (const line of contents.split('\n')) {
       if (!line.trim()) continue
       try {
         const entry = JSON.parse(line)
         if (!isHistoryEntry(entry)) continue
-        const history = roomHistory.get(entry.room) ?? []
-        history.push(entry)
-        roomHistory.set(entry.room, history)
+        sequence = Math.max(sequence, entry.sequence ?? 0)
+        latest.delete(entry.id)
+        latest.set(entry.id, entry)
       } catch {
         // Ignore an incomplete final line left by an interrupted write.
       }
+    }
+    for (const entry of latest.values()) {
+      const history = roomHistory.get(entry.room) ?? []
+      history.push(entry)
+      roomHistory.set(entry.room, history)
     }
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error
@@ -140,24 +149,37 @@ function snapshot() {
 }
 
 function appendLog(room, message) {
+  const sourceRoom = room
+  let event = 'log'
+  try {
+    const parsed = JSON.parse(message)
+    if (typeof parsed?.event === 'string') event = parsed.event.trim() || 'log'
+  } catch { /* Plain text messages use the default event. */ }
+  room = eventRoutes.find((rule) => rule.source === sourceRoom && rule.event === event)?.target ?? room
+
   const isNewRoom = !roomHistory.has(room)
   if (isNewRoom) roomHistory.set(room, [])
 
-  const entry = {
-    id: randomUUID(),
-    room,
-    at: new Date().toISOString(),
-    message,
-  }
   const history = roomHistory.get(room)
-  history.push(entry)
   const cutoff = Date.now() - retentionMs
   while (history.length && Date.parse(history[0].at) < cutoff) history.shift()
+  // Only entries created with grouping metadata participate; legacy logs stay intact.
+  const existingIndex = history.findIndex((entry) => entry.count && entry.message === message && (entry.sourceRoom ?? entry.room) === sourceRoom)
+  const previous = existingIndex >= 0 ? history.splice(existingIndex, 1)[0] : null
+  const at = new Date().toISOString()
+  const entry = {
+    id: previous?.id ?? randomUUID(), room, sourceRoom, message, at,
+    firstAt: previous?.firstAt ?? at,
+    count: (previous?.count ?? 0) + 1,
+    times: [...(previous?.times ?? []), at].slice(-10),
+    sequence: sequence = Math.max(sequence + 1, Date.now() * 1000),
+  }
+  history.push(entry)
   if (history.length > historySize) history.shift()
   persistHistoryEntry(entry)
 
   if (isNewRoom) broadcastRooms()
-  broadcast({ type: 'log', payload: entry })
+  broadcast({ type: previous ? 'update' : 'log', payload: entry })
   return entry
 }
 
@@ -190,13 +212,14 @@ async function readSettings() {
 function updateSettings(patch) {
   settingsWrite = settingsWrite.catch(() => undefined).then(async () => {
     const { settings, hasValidPrimary } = await loadSettingsState()
-    const next = { ...settings, ...patch, version: 1 }
+    const next = { ...settings, ...(typeof patch === 'function' ? patch(settings) : patch), version: 1 }
     const temporaryFile = `${settingsFile}.${process.pid}.tmp`
 
     await mkdir(dirname(settingsFile), { recursive: true })
     if (hasValidPrimary) await copyFile(settingsFile, `${settingsFile}.bak`)
     await writeFile(temporaryFile, `${JSON.stringify(next, null, 2)}\n`)
     await rename(temporaryFile, settingsFile)
+    eventRoutes = Array.isArray(next.eventRoutes) ? next.eventRoutes : []
     return next
   })
 
@@ -237,6 +260,33 @@ async function serveFile(request, response) {
 
   if (requestUrl.pathname === '/api/health') {
     sendJson(response, 200, { status: 'ok' })
+    return
+  }
+
+  if (requestUrl.pathname === '/api/routes') {
+    if (request.method === 'GET') {
+      sendJson(response, 200, eventRoutes)
+      return
+    }
+    if (request.method !== 'PUT') {
+      sendJson(response, 405, { error: 'Method not allowed' })
+      return
+    }
+    const rule = await readJsonBody(request)
+    const validRoom = (value) => typeof value === 'string' && value.trim() === value && value.length > 0 && value.length <= 64
+    if (!validRoom(rule.source) || typeof rule.event !== 'string' || !rule.event.trim()
+      || (rule.target !== null && (!validRoom(rule.target) || rule.target === rule.source))) {
+      sendJson(response, 400, { error: 'Invalid routing rule' })
+      return
+    }
+    const next = await updateSettings((settings) => ({
+      eventRoutes: [
+        ...(Array.isArray(settings.eventRoutes) ? settings.eventRoutes : [])
+          .filter((entry) => entry.source !== rule.source || entry.event !== rule.event),
+        ...(rule.target === null ? [] : [{ source: rule.source, event: rule.event, target: rule.target }]),
+      ],
+    }))
+    sendJson(response, 200, next.eventRoutes)
     return
   }
 
@@ -383,6 +433,7 @@ producers.on('connection', (socket, request) => {
   })
 })
 
+eventRoutes = (await readSettings()).eventRoutes ?? []
 await loadHistory()
 await compactHistory()
 

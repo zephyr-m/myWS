@@ -44,6 +44,8 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
     }
 
     const roomLogs = logsByRoom[event.payload.room] ?? []
+    const previousIndex = roomLogs.findIndex((log) => log.id === event.payload.id)
+    if (previousIndex >= 0) roomLogs.splice(previousIndex, 1)
     roomLogs.push(event.payload)
     logsByRoom[event.payload.room] = roomLogs
     onLog?.(event.payload)
