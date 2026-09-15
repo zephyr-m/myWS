@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import type { LogEntry } from '@/types'
 
 defineProps<{
+  resizable?: boolean
   active: boolean
   canMakeFull: boolean
   firstUnreadIndex: number
@@ -29,6 +30,7 @@ defineEmits<{
       </div>
       <div class="flex shrink-0 items-center">
         <Button
+          v-if="resizable !== false"
           variant="ghost"
           size="icon-sm"
           :disabled="half && !canMakeFull"

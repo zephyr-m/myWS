@@ -4,8 +4,9 @@ services:
     ports:
       - "8081:8081"
     environment:
+      LOG_HISTORY_FILE: /app/data/logs.jsonl
+      LOG_RETENTION_HOURS: 6
       PORT: 8081
-      ROOM_HISTORY_SIZE: 500
       SETTINGS_FILE: /app/data/settings.json
     volumes:
       - ./data:/app/data

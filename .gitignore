@@ -12,6 +12,7 @@ dist
 dist-ssr
 *.local
 /data/*.json
+/data/*.jsonl
 /data/*.bak
 /data/*.tmp
 !/data/.gitkeep

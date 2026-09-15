@@ -1,22 +1,31 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
+import { appendFile, copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { dirname, extname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocket, WebSocketServer } from 'ws'
 
 const port = Number(process.env.PORT ?? 8081)
-const configuredHistorySize = Number(process.env.ROOM_HISTORY_SIZE ?? 500)
-const historySize = Number.isFinite(configuredHistorySize)
-  ? Math.max(1, configuredHistorySize)
-  : 500
+const configuredHistorySize = Number(process.env.ROOM_HISTORY_SIZE ?? 0)
+const historySize = Number.isFinite(configuredHistorySize) && configuredHistorySize > 0
+  ? configuredHistorySize
+  : Infinity
+const configuredRetentionHours = Number(process.env.LOG_RETENTION_HOURS ?? 6)
+const retentionHours = Number.isFinite(configuredRetentionHours) && configuredRetentionHours > 0
+  ? configuredRetentionHours
+  : 6
+const retentionMs = retentionHours * 60 * 60 * 1000
 const distDirectory = resolve(fileURLToPath(new URL('../dist', import.meta.url)))
 const settingsFile = resolve(
   process.env.SETTINGS_FILE ?? fileURLToPath(new URL('../data/settings.json', import.meta.url)),
 )
+const historyFile = resolve(
+  process.env.LOG_HISTORY_FILE ?? fileURLToPath(new URL('../data/logs.jsonl', import.meta.url)),
+)
 const roomHistory = new Map()
 const producerCount = new Map()
+let historyWrite = Promise.resolve()
 let settingsWrite = Promise.resolve()
 
 const viewers = new WebSocketServer({ noServer: true })
@@ -30,6 +39,76 @@ const mimeTypes = {
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.webp': 'image/webp',
+}
+
+function isHistoryEntry(value) {
+  return value
+    && typeof value === 'object'
+    && typeof value.id === 'string'
+    && typeof value.room === 'string'
+    && typeof value.at === 'string'
+    && Number.isFinite(Date.parse(value.at))
+    && typeof value.message === 'string'
+}
+
+function pruneHistory() {
+  const cutoff = Date.now() - retentionMs
+
+  for (const [room, history] of roomHistory) {
+    while (history.length && Date.parse(history[0].at) < cutoff) history.shift()
+    if (history.length > historySize) history.splice(0, history.length - historySize)
+    if (!history.length && (producerCount.get(room) ?? 0) === 0) roomHistory.delete(room)
+  }
+}
+
+function enqueueHistoryWrite(task) {
+  historyWrite = historyWrite
+    .then(task)
+    .catch((error) => console.error('Failed to persist log history:', error))
+  return historyWrite
+}
+
+function persistHistoryEntry(entry) {
+  void enqueueHistoryWrite(() => appendFile(historyFile, `${JSON.stringify(entry)}\n`))
+}
+
+function compactHistory() {
+  pruneHistory()
+  const entries = [...roomHistory.values()]
+    .flat()
+    .sort((first, second) => first.at.localeCompare(second.at))
+  const contents = entries.map((entry) => JSON.stringify(entry)).join('\n')
+
+  return enqueueHistoryWrite(async () => {
+    const temporaryFile = `${historyFile}.${process.pid}.tmp`
+
+    await writeFile(temporaryFile, contents ? `${contents}\n` : '')
+    await rename(temporaryFile, historyFile)
+  })
+}
+
+async function loadHistory() {
+  await mkdir(dirname(historyFile), { recursive: true })
+
+  try {
+    const contents = await readFile(historyFile, 'utf8')
+    for (const line of contents.split('\n')) {
+      if (!line.trim()) continue
+      try {
+        const entry = JSON.parse(line)
+        if (!isHistoryEntry(entry)) continue
+        const history = roomHistory.get(entry.room) ?? []
+        history.push(entry)
+        roomHistory.set(entry.room, history)
+      } catch {
+        // Ignore an incomplete final line left by an interrupted write.
+      }
+    }
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
+
+  pruneHistory()
 }
 
 function rooms() {
@@ -72,7 +151,10 @@ function appendLog(room, message) {
   }
   const history = roomHistory.get(room)
   history.push(entry)
+  const cutoff = Date.now() - retentionMs
+  while (history.length && Date.parse(history[0].at) < cutoff) history.shift()
   if (history.length > historySize) history.shift()
+  persistHistoryEntry(entry)
 
   if (isNewRoom) broadcastRooms()
   broadcast({ type: 'log', payload: entry })
@@ -192,6 +274,7 @@ async function serveFile(request, response) {
     }
 
     producerCount.delete(room)
+    await compactHistory()
     broadcastRooms()
     sendJson(response, 200, { room })
     return
@@ -286,8 +369,28 @@ producers.on('connection', (socket, request) => {
   })
 })
 
+await loadHistory()
+await compactHistory()
+
+const historyCleanup = setInterval(() => {
+  void compactHistory().then(broadcastRooms)
+}, 60 * 60 * 1000)
+historyCleanup.unref()
+
+async function shutdown() {
+  server.close()
+  for (const socket of viewers.clients) socket.terminate()
+  for (const socket of producers.clients) socket.terminate()
+  await historyWrite
+  process.exit(0)
+}
+
+process.once('SIGINT', shutdown)
+process.once('SIGTERM', shutdown)
+
 server.listen(port, '0.0.0.0', () => {
   console.log(`Live logs is running at http://localhost:${port}`)
+  console.log(`Keeping log history for ${retentionHours} hours in ${historyFile}`)
   console.log(`Send logs to http://localhost:${port}/api/logs?room=general`)
   console.log(`Send logs to ws://localhost:${port}/api/logs?room=general`)
 })

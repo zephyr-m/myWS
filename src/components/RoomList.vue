@@ -15,15 +15,23 @@ const props = withDefaults(defineProps<{
   connected: boolean
   contours: LogContour[]
   eventStatsByRoom?: Record<string, { enabled: number; notifications: number; total: number }>
+  viewMode?: 'rooms' | 'screens'
   mode?: 'dashboard' | 'events'
   rooms: RoomSummary[]
   unreadByRoom: Record<string, number>
 }>(), {
   eventStatsByRoom: () => ({}),
   mode: 'dashboard',
+  viewMode: 'screens',
 })
 
 defineEmits<{
+  'update:viewMode': [mode: 'rooms' | 'screens']
+  selectServerRoom: [serverId: string, room: string]
+  assignRoom: [room: string, serverId: string]
+  releaseRoom: [room: string]
+  moveRoom: [room: string, serverId: string, screenId: string]
+  detachRoom: [room: string]
   createContour: []
   createScreen: [server: LogServer]
   createServer: [contour: LogContour]
@@ -41,6 +49,33 @@ defineEmits<{
   selectServer: [contourId: string, serverId: string]
 }>()
 
+const roomDialog = ref<HTMLDialogElement | null>(null)
+const actionRoom = ref('')
+const targetScreen = ref('')
+const targetServer = ref('')
+const serverOptions = computed(() => props.contours.flatMap((contour) => contour.servers.map((server) => ({
+  id: server.id, label: `${contour.name} / ${server.name}`, current: server.rooms.includes(actionRoom.value),
+}))))
+const screenOptions = computed(() => props.contours.flatMap((contour) =>
+  contour.servers.flatMap((server) => server.screens.map((screen) => ({
+    key: JSON.stringify([server.id, screen.id]),
+    serverId: server.id,
+    screenId: screen.id,
+    label: `${contour.name} / ${server.name} / ${screen.name}`,
+    current: screen.rooms.some((room) => room.name === actionRoom.value),
+  }))),
+))
+const selectedTarget = computed(() => screenOptions.value.find((screen) => screen.key === targetScreen.value))
+
+function showRoomActions(event: MouseEvent, room: string) {
+  if (props.mode !== 'dashboard') return
+  event.preventDefault()
+  actionRoom.value = room
+  targetScreen.value = ''
+  targetServer.value = ''
+  roomDialog.value?.showModal()
+}
+
 const expandedContours = ref<Set<string>>(new Set())
 const expandedServers = ref<Set<string>>(new Set())
 const expandedScreens = ref<Set<string>>(new Set())
@@ -51,7 +86,7 @@ const sidebarWidth = ref(Math.min(640, Math.max(
 const roomByName = computed(() => new Map(props.rooms.map((room) => [room.name, room])))
 const assignedRoomNames = computed(() => new Set(
   props.contours.flatMap((contour) => contour.servers.flatMap((server) =>
-    server.screens.flatMap((screen) => screen.rooms.map((room) => room.name)),
+    server.rooms,
   )),
 ))
 const availableRooms = computed(() =>
@@ -91,12 +126,17 @@ function toggleScreen(serverId: string, screenId: string) {
   expandedScreens.value = toggleItem(expandedScreens.value, screenKey(serverId, screenId))
 }
 
+function unplacedRooms(server: LogServer) {
+  const placed = new Set(server.screens.flatMap((screen) => screen.rooms.map((room) => room.name)))
+  return server.rooms.filter((room) => !placed.has(room))
+}
+
 function screenUnread(screen: LogScreen) {
   return screen.rooms.reduce((total, room) => total + (props.unreadByRoom[room.name] ?? 0), 0)
 }
 
 function serverUnread(server: LogServer) {
-  return server.screens.reduce((total, screen) => total + screenUnread(screen), 0)
+  return server.rooms.reduce((total, room) => total + (props.unreadByRoom[room] ?? 0), 0)
 }
 
 function contourUnread(contour: LogContour) {
@@ -104,9 +144,7 @@ function contourUnread(contour: LogContour) {
 }
 
 function serverOnline(server: LogServer) {
-  return server.screens.some((screen) => screen.rooms.some((room) =>
-    (roomByName.value.get(room.name)?.producers ?? 0) > 0,
-  ))
+  return server.rooms.some((room) => (roomByName.value.get(room)?.producers ?? 0) > 0)
 }
 
 function unreadLabel(count: number) {
@@ -157,6 +195,13 @@ function startResize(event: PointerEvent) {
       />
     </header>
 
+    <div v-if="mode === 'dashboard'" class="mx-2 mb-2 flex rounded border p-1" aria-label="Режим просмотра">
+      <button v-for="item in (['rooms', 'screens'] as const)" :key="item" type="button"
+        class="flex-1 rounded px-3 py-1.5 text-xs" :class="viewMode === item ? 'bg-muted font-semibold' : 'text-muted-foreground'"
+        :aria-pressed="viewMode === item" @click="$emit('update:viewMode', item)">
+        {{ item === 'rooms' ? 'Комнаты' : 'Экраны' }}
+      </button>
+    </div>
     <ScrollArea class="min-h-0 flex-1 px-2 pb-3">
       <div class="mb-5">
         <div class="mb-1 flex items-center justify-between px-2">
@@ -273,6 +318,29 @@ function startResize(event: PointerEvent) {
               </div>
 
               <div v-if="expandedServers.has(server.id)" class="ml-3 border-l pl-1">
+                <div v-if="viewMode === 'rooms' || mode === 'events' || unplacedRooms(server).length" class="py-1">
+                  <p v-if="viewMode === 'screens' && mode === 'dashboard'" class="p-2 text-[10px] text-muted-foreground">Без экрана</p>
+                  <p v-if="!server.rooms.length" class="p-2 text-xs text-muted-foreground">Нет комнат</p>
+                  <div v-for="room in (viewMode === 'screens' && mode === 'dashboard' ? unplacedRooms(server) : server.rooms)" :key="room" class="flex items-center rounded hover:bg-muted"
+                    :class="activeServerId === server.id && activeRoom === room && 'bg-muted'"
+                    @contextmenu="showRoomActions($event, room)">
+                    <button type="button" class="flex min-w-0 flex-1 items-center gap-2 p-2 text-left text-xs"
+                      @click="mode === 'events' || viewMode === 'screens' ? $emit('select', room) : $emit('selectServerRoom', server.id, room)">
+                      <span class="truncate"># {{ room }}</span>
+                      <span v-if="mode === 'events'" class="shrink-0 text-[9px] text-muted-foreground">
+                        {{ eventStatsByRoom[room]?.enabled ?? 0 }}/{{ eventStatsByRoom[room]?.total ?? 0 }}
+                        · 🔔 {{ eventStatsByRoom[room]?.notifications ?? 0 }}/{{ eventStatsByRoom[room]?.total ?? 0 }}
+                      </span>
+                      <span v-if="unreadByRoom[room]" class="rounded-full bg-sky-500 px-1.5 text-white">{{ unreadLabel(unreadByRoom[room]) }}</span>
+                      <span v-if="(roomByName.get(room)?.producers ?? 0) > 0" class="size-1.5 rounded-full bg-emerald-500" />
+                    </button>
+                    <a v-if="mode === 'dashboard'" :href="eventSettingsUrl(room)" class="grid size-7 place-items-center"
+                      :aria-label="`Настроить события комнаты ${room}`"><Settings class="size-3.5" /></a>
+                    <button v-if="mode === 'dashboard'" type="button" class="size-7" :aria-label="`Действия с комнатой ${room}`"
+                      @click="showRoomActions($event, room)">⋯</button>
+                  </div>
+                </div>
+                <template v-if="viewMode === 'screens' && mode === 'dashboard'">
                 <div v-for="screen in server.screens" :key="screen.id" class="mb-0.5">
                   <div
                     class="group/screen flex items-center rounded-md"
@@ -333,6 +401,7 @@ function startResize(event: PointerEvent) {
                       v-for="room in screen.rooms"
                       :key="room.name"
                       class="group/room flex w-full items-center rounded hover:bg-muted"
+                      @contextmenu="showRoomActions($event, room.name)"
                       :class="activeServerId === server.id && activeScreenId === screen.id && activeRoom === room.name && 'bg-muted'"
                     >
                       <button
@@ -342,13 +411,6 @@ function startResize(event: PointerEvent) {
                       >
                         <span class="text-muted-foreground">#</span>
                         <span class="min-w-0 flex-1 truncate">{{ room.name }}</span>
-                        <span
-                          v-if="mode === 'events'"
-                          class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] tabular-nums text-muted-foreground"
-                        >
-                          {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
-                          · 🔔 {{ eventStatsByRoom[room.name]?.notifications ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
-                        </span>
                         <span
                           v-if="mode === 'dashboard' && unreadByRoom[room.name]"
                           class="rounded-full bg-sky-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white"
@@ -360,6 +422,13 @@ function startResize(event: PointerEvent) {
                           class="size-1.5 shrink-0 rounded-full bg-emerald-500"
                         />
                       </button>
+                      <button
+                        v-if="mode === 'dashboard'"
+                        type="button"
+                        class="grid size-7 shrink-0 place-items-center rounded hover:bg-background"
+                        :aria-label="`Действия с комнатой ${room.name}`"
+                        @click="showRoomActions($event, room.name)"
+                      >⋯</button>
                       <a
                         v-if="mode === 'dashboard'"
                         :href="eventSettingsUrl(room.name)"
@@ -380,6 +449,7 @@ function startResize(event: PointerEvent) {
                 >
                   <span>+</span> Новый экран
                 </button>
+                </template>
               </div>
             </div>
 
@@ -408,18 +478,19 @@ function startResize(event: PointerEvent) {
         v-else-if="availableRooms.length === 0"
         class="px-2 py-6 text-xs leading-5 text-muted-foreground"
       >
-        Все комнаты распределены по экранам.
+        Все комнаты назначены серверам.
       </p>
 
       <div
         v-for="room in availableRooms"
         :key="room.name"
         class="group/room mb-1 flex w-full items-center rounded-md hover:bg-accent hover:text-accent-foreground"
+        :class="activeRoom === room.name && 'bg-accent'"
+        @contextmenu="showRoomActions($event, room.name)"
       >
         <Button
           variant="ghost"
           class="h-auto min-w-0 flex-1 justify-start gap-2 px-2.5 py-2 hover:bg-transparent"
-          :disabled="mode === 'dashboard' && !canOpenRoom"
           @click="$emit('select', room.name)"
         >
           <span class="text-muted-foreground">#</span>
@@ -443,6 +514,13 @@ function startResize(event: PointerEvent) {
             :title="`${room.producers} подключено`"
           />
         </Button>
+        <button
+          v-if="mode === 'dashboard'"
+          type="button"
+          class="grid size-7 shrink-0 place-items-center rounded hover:bg-background"
+          :aria-label="`Действия с комнатой ${room.name}`"
+          @click="showRoomActions($event, room.name)"
+        >⋯</button>
         <a
           v-if="mode === 'dashboard'"
           :href="eventSettingsUrl(room.name)"
@@ -478,5 +556,45 @@ function startResize(event: PointerEvent) {
         Документация
       </a>
     </footer>
+    <dialog
+      ref="roomDialog"
+      class="m-auto w-full max-w-md rounded-lg border bg-background p-5 text-foreground shadow-lg backdrop:bg-black/40"
+      aria-labelledby="room-actions-title"
+      @click="($event.target === roomDialog) && roomDialog?.close()"
+    >
+      <form @submit.prevent="selectedTarget && ($emit('moveRoom', actionRoom, selectedTarget.serverId, selectedTarget.screenId), roomDialog?.close())">
+        <h2 id="room-actions-title" class="mb-4 font-semibold"># {{ actionRoom }}</h2>
+        <label for="room-server" class="mb-2 block text-sm">Назначить серверу</label>
+        <div class="mb-4 flex gap-2">
+          <select id="room-server" v-model="targetServer" class="min-w-0 flex-1 rounded border bg-background p-2 text-sm">
+            <option disabled value="">Выберите сервер</option>
+            <option v-for="server in serverOptions" :key="server.id" :value="server.id" :disabled="server.current">
+              {{ server.label }}{{ server.current ? ' (текущий)' : '' }}
+            </option>
+          </select>
+          <Button type="button" :disabled="!targetServer" @click="$emit('assignRoom', actionRoom, targetServer); roomDialog?.close()">Назначить</Button>
+        </div>
+        <p class="mb-4 text-xs text-muted-foreground">При смене сервера комната будет убрана с экранов прежнего сервера.</p>
+        <label for="room-target" class="mb-2 block text-sm">
+          {{ assignedRoomNames.has(actionRoom) ? 'Перенести на экран' : 'Добавить на экран' }}
+        </label>
+        <select id="room-target" v-model="targetScreen" class="mb-4 w-full rounded border bg-background p-2 text-sm" required>
+          <option disabled value="">Выберите контур / сервер / экран</option>
+          <option v-for="screen in screenOptions" :key="screen.key" :value="screen.key" :disabled="screen.current">
+            {{ screen.label }}{{ screen.current ? ' (текущий)' : '' }}
+          </option>
+        </select>
+        <div class="flex flex-wrap justify-end gap-2">
+          <Button v-if="assignedRoomNames.has(actionRoom)" type="button" variant="outline"
+            @click="$emit('releaseRoom', actionRoom); roomDialog?.close()">Освободить комнату</Button>
+          <Button v-if="screenOptions.some((screen) => screen.current)" type="button" variant="outline"
+            @click="$emit('detachRoom', actionRoom); roomDialog?.close()">Убрать с экрана</Button>
+          <Button type="button" variant="ghost" @click="roomDialog?.close()">Отмена</Button>
+          <Button type="submit" :disabled="!selectedTarget">
+            {{ assignedRoomNames.has(actionRoom) ? 'Перенести' : 'Добавить' }}
+          </Button>
+        </div>
+      </form>
+    </dialog>
   </aside>
 </template>

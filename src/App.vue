@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ChannelPanel from '@/components/ChannelPanel.vue'
 import DocsPage from '@/components/DocsPage.vue'
 import EventSettings from '@/components/EventSettings.vue'
 import RoomList from '@/components/RoomList.vue'
+import RoomTabs from '@/components/RoomTabs.vue'
 import ScreenTabs from '@/components/ScreenTabs.vue'
 import { Separator } from '@/components/ui/separator'
 import { useEventFilters } from '@/composables/useEventFilters'
@@ -17,9 +18,6 @@ import type {
   LogScreen,
   LogServer,
   OpenRoom,
-  RoomPlace,
-  RoomRow,
-  RoomSize,
 } from '@/composables/useScreens'
 
 const isDocsPage = window.location.pathname === '/docs'
@@ -37,7 +35,8 @@ function enableNotificationSound() {
 }
 
 function notifyAboutLog(log: LogEntry) {
-  if (notificationAudio?.state === 'running') {
+  const message = parseLogMessage(log.message)
+  if (isEventEnabled(log.room, message.event) && notificationAudio?.state === 'running') {
     const oscillator = notificationAudio.createOscillator()
     const gain = notificationAudio.createGain()
     oscillator.frequency.setValueAtTime(720, notificationAudio.currentTime)
@@ -50,7 +49,6 @@ function notifyAboutLog(log: LogEntry) {
   }
 
   if ('Notification' in window && Notification.permission === 'granted') {
-    const message = parseLogMessage(log.message)
     if (!isNotificationEnabled(log.room, message.event)) return
     const notification = new Notification(`# ${log.room} · ${message.event}`, {
       body: message.message,
@@ -80,6 +78,10 @@ const {
 const { connected, deleteRoom: deleteRoomFromPool, logsByRoom, rooms } = useLogStream(notifyAboutLog)
 const { firstUnreadIndex, markReadThrough } = useReadState()
 const {
+  openRoomTab,
+  closeRoomTab,
+  assignRoom,
+  releaseRoom,
   activeContourId,
   activeRoom,
   activeScreenId,
@@ -131,38 +133,70 @@ const unreadByRoom = computed(() => Object.fromEntries(
   }),
 ))
 
-function nextPlace(preferredRow: RoomRow): RoomPlace {
-  for (const row of [preferredRow, preferredRow === 'top' ? 'bottom' : 'top'] as RoomRow[]) {
-    const index = [1, 2, 3, 4, 5, 6].find((candidate) =>
-      !openRooms.value.some((room) => room.place.row === row && room.place.index === candidate),
-    )
-    if (index) return { row, index }
-  }
-  throw new Error('No room place available')
+const viewMode = ref<'rooms' | 'screens'>(localStorage.getItem('live-logs.view-mode') === 'screens' ? 'screens' : 'rooms')
+watch(viewMode, (mode) => {
+  localStorage.setItem('live-logs.view-mode', mode)
+  previewRoom.value = null
+})
+const displayedRoom = computed(() => viewMode.value === 'rooms' ? activeServer.value.activeRoomTab : previewRoom.value)
+function assignToServer(room: string, serverId: string) {
+  assignRoom(room, serverId)
+  openRoomTab(room, serverId)
+  viewMode.value = 'rooms'
+}
+function closeDisplayedRoom() {
+  if (viewMode.value === 'rooms' && displayedRoom.value) closeRoomTab(displayedRoom.value)
+  else previewRoom.value = null
 }
 
+const previewRoom = ref<string | null>(null)
+watch([activeContourId, activeServerId, activeScreenId], () => { previewRoom.value = null })
+watch(rooms, () => {
+  if (previewRoom.value && !rooms.value.some((room) => room.name === previewRoom.value)) {
+    previewRoom.value = null
+  }
+})
+
 function openRoom(room: string) {
-  const opened = openRooms.value.find((candidate) => candidate.name === room)
-  if (opened) {
-    activeRoom.value = room
+  if (viewMode.value === 'rooms') openRoomTab(room)
+  else previewRoom.value = room
+}
+
+function moveRoom(room: string, serverId: string, screenId: string) {
+  const target = contours.value.flatMap((contour) => contour.servers)
+    .find((server) => server.id === serverId)?.screens.find((screen) => screen.id === screenId)
+  if (!target || target.rooms.some((entry) => entry.name === room)) return
+  const full = target.rooms.filter((entry) => entry.size === 'full').length
+  const top = target.rooms.filter((entry) => entry.size === 'top').length
+  const bottom = target.rooms.filter((entry) => entry.size === 'bottom').length
+  if (top === bottom && full + Math.max(top, bottom) >= 6) {
+    window.alert('На выбранном экране нет свободного места')
     return
   }
-  if (!canOpenRoom.value) return
-
-  const size: RoomSize = topRooms.value.length > bottomRooms.value.length
-    ? 'bottom'
-    : bottomRooms.value.length > topRooms.value.length
-      ? 'top'
-      : 'full'
-  const place = nextPlace(size === 'bottom' ? 'bottom' : 'top')
-  const order = Math.max(-1, ...openRooms.value.map((openRoom) => openRoom.order)) + 1
-  openRooms.value.push({
-    name: room,
-    size: size === 'full' ? 'full' : place.row,
-    order,
-    place,
-  })
+  const size = top > bottom ? 'bottom' : bottom > top ? 'top' : 'full'
+  const row = size === 'bottom' ? 'bottom' : 'top'
+  const index = [1, 2, 3, 4, 5, 6].find((index) =>
+    !target.rooms.some((entry) => entry.place.row === row && entry.place.index === index))
+  if (!index) return
+  detachRoom(room)
+  assignRoom(room, serverId)
+  target.rooms.push({ name: room, size, place: { row, index },
+    order: Math.max(-1, ...target.rooms.map((entry) => entry.order)) + 1 })
+  previewRoom.value = null
+  viewMode.value = 'screens'
+  selectScreen(serverId, screenId)
   activeRoom.value = room
+}
+
+function detachRoom(room: string) {
+  for (const contour of contours.value) {
+    for (const server of contour.servers) {
+      for (const screen of server.screens) {
+        screen.rooms = screen.rooms.filter((entry) => entry.name !== room)
+        if (screen.activeRoom === room) screen.activeRoom = null
+      }
+    }
+  }
 }
 
 function closeRoom(room: string) {
@@ -241,11 +275,14 @@ function removeScreen(server: LogServer, screen: LogScreen) {
 }
 
 function selectScreenRoom(serverId: string, screenId: string, room: string) {
+  previewRoom.value = null
+  viewMode.value = 'screens'
   selectScreen(serverId, screenId)
   activeRoom.value = room
 }
 
 function selectCurrentScreen(screenId: string) {
+  previewRoom.value = null
   selectScreen(activeServer.value.id, screenId)
 }
 </script>
@@ -270,7 +307,12 @@ function selectCurrentScreen(screenId: string) {
   <div v-else class="flex h-dvh overflow-hidden bg-background text-foreground">
     <RoomList
       :active-contour-id="activeContourId"
-      :active-room="activeRoom"
+      :active-room="viewMode === 'rooms' ? displayedRoom : previewRoom ?? activeRoom"
+      :view-mode="viewMode"
+      @update:view-mode="viewMode = $event"
+      @select-server-room="(serverId, room) => openRoomTab(room, serverId)"
+      @assign-room="assignToServer"
+      @release-room="releaseRoom"
       :active-screen-id="activeScreenId"
       :active-server-id="activeServerId"
       :can-open-room="canOpenRoom"
@@ -289,23 +331,48 @@ function selectCurrentScreen(screenId: string) {
       @rename-screen="editScreen"
       @rename-server="editServer"
       @select="openRoom"
-      @select-contour="selectContour"
-      @select-screen="selectScreen"
+      @move-room="moveRoom"
+      @detach-room="detachRoom"
+      @select-contour="(id) => { previewRoom = null; selectContour(id) }"
+      @select-screen="(serverId, screenId) => { previewRoom = null; selectScreen(serverId, screenId) }"
       @select-screen-room="selectScreenRoom"
-      @select-server="selectServer"
+      @select-server="(contourId, serverId) => { previewRoom = null; selectServer(contourId, serverId) }"
     />
 
     <Separator orientation="vertical" />
 
     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <RoomTabs
+        v-if="viewMode === 'rooms'"
+        :rooms="activeServer.roomTabs"
+        :active-room="activeServer.activeRoomTab"
+        :unread-by-room="unreadByRoom"
+        @select="openRoomTab($event)"
+        @close="closeRoomTab($event)"
+      />
       <ScreenTabs
-        :active-screen-id="activeScreenId"
+        v-else
+        :active-screen-id="previewRoom ? '' : activeScreenId"
         :screens="openScreens"
         @close="closeScreenTab"
         @select="selectCurrentScreen"
       />
 
-    <main v-if="openRooms.length" class="flex min-h-0 min-w-0 flex-1 gap-px bg-border">
+    <ChannelPanel
+      v-if="displayedRoom"
+      :key="displayedRoom"
+      class="min-h-0 flex-1"
+      :active="true"
+      :can-make-full="true"
+      :resizable="false"
+      :first-unread-index="firstUnreadIndex(displayedRoom, visibleLogsByRoom[displayedRoom] ?? [])"
+      :half="false"
+      :logs="visibleLogsByRoom[displayedRoom] ?? []"
+      :room="displayedRoom"
+      @close="closeDisplayedRoom"
+      @read-through="readThrough(displayedRoom, $event)"
+    />
+    <main v-else-if="viewMode === 'screens' && openRooms.length" class="flex min-h-0 min-w-0 flex-1 gap-px bg-border">
       <ChannelPanel
         v-for="room in fullRooms"
         :key="`${activeServerId}:${activeScreenId}:${room.name}`"

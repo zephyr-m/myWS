@@ -26,6 +26,9 @@ export interface LogScreen {
 export interface LogServer {
   id: string
   name: string
+  rooms: string[]
+  roomTabs: string[]
+  activeRoomTab: string | null
   screens: LogScreen[]
   openScreenIds: string[]
   activeScreenId: string
@@ -56,6 +59,9 @@ function createServer(name: string, screens: LogScreen[] = [mainScreen()]): LogS
   return {
     id: makeId('server'),
     name,
+    rooms: [...new Set(screens.flatMap((screen) => screen.rooms.map((room) => room.name)))],
+    roomTabs: [],
+    activeRoomTab: null,
     screens,
     openScreenIds: ['main'],
     activeScreenId: 'main',
@@ -81,6 +87,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 function normalizeHierarchy(contours: LogContour[]) {
   const assignedRooms = new Set<string>()
+  const ownedRooms = new Set<string>()
 
   for (const contour of contours) {
     if (!Array.isArray(contour.servers) || contour.servers.length === 0) {
@@ -106,6 +113,17 @@ function normalizeHierarchy(contours: LogContour[]) {
           screen.activeRoom = null
         }
       }
+
+      server.rooms = [...new Set([
+        ...(Array.isArray(server.rooms) ? server.rooms.filter((room) => typeof room === 'string') : []),
+        ...server.screens.flatMap((screen) => screen.rooms.map((room) => room.name)),
+      ])].filter((room) => {
+        if (ownedRooms.has(room)) return false
+        ownedRooms.add(room)
+        return true
+      })
+      server.roomTabs = [...new Set(Array.isArray(server.roomTabs) ? server.roomTabs.filter((room) => typeof room === 'string') : [])]
+      if (!server.roomTabs.includes(server.activeRoomTab ?? '')) server.activeRoomTab = server.roomTabs[0] ?? null
 
       const screenIds = new Set(server.screens.map((screen) => screen.id))
       server.openScreenIds = [...new Set(
@@ -238,6 +256,52 @@ export function useScreens() {
     return null
   }
 
+  function openRoomTab(room: string, serverId = activeServerId.value) {
+    const target = findServer(serverId)
+    if (!target) return
+    selectServer(target.contour.id, serverId)
+    if (!target.server.roomTabs.includes(room)) target.server.roomTabs.push(room)
+    target.server.activeRoomTab = room
+  }
+
+  function closeRoomTab(room: string, server = activeServer.value) {
+    const index = server.roomTabs.indexOf(room)
+    if (index < 0) return
+    server.roomTabs.splice(index, 1)
+    if (server.activeRoomTab === room) {
+      server.activeRoomTab = server.roomTabs[Math.min(index, server.roomTabs.length - 1)] ?? null
+    }
+  }
+
+  function assignRoom(room: string, serverId: string) {
+    const target = findServer(serverId)
+    if (!target) return
+    for (const contour of contours.value) {
+      for (const server of contour.servers) {
+        if (server.id === serverId) continue
+        server.rooms = server.rooms.filter((name) => name !== room)
+        closeRoomTab(room, server)
+        for (const screen of server.screens) {
+          screen.rooms = screen.rooms.filter((entry) => entry.name !== room)
+          if (screen.activeRoom === room) screen.activeRoom = null
+        }
+      }
+    }
+    if (!target.server.rooms.includes(room)) target.server.rooms.push(room)
+  }
+
+  function releaseRoom(room: string) {
+    for (const contour of contours.value) {
+      for (const server of contour.servers) {
+        server.rooms = server.rooms.filter((name) => name !== room)
+        for (const screen of server.screens) {
+          screen.rooms = screen.rooms.filter((entry) => entry.name !== room)
+          if (screen.activeRoom === room) screen.activeRoom = null
+        }
+      }
+    }
+  }
+
   function addContour(name: string) {
     const contour = createContour(name)
     contours.value.push(contour)
@@ -336,6 +400,10 @@ export function useScreens() {
   }
 
   return {
+    openRoomTab,
+    closeRoomTab,
+    assignRoom,
+    releaseRoom,
     activeContour,
     activeContourId,
     activeRoom,

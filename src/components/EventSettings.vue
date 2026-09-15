@@ -25,7 +25,7 @@ const selectedRoom = ref(requestedRoom)
 const noUnread: Record<string, number> = {}
 const roomNames = computed(() => [...new Set([
   ...props.contours.flatMap((contour) => contour.servers.flatMap((server) =>
-    server.screens.flatMap((screen) => screen.rooms.map((room) => room.name)),
+    server.rooms,
   )),
   ...props.rooms.map((room) => room.name),
 ])])
@@ -56,6 +56,9 @@ watch(roomNames, (rooms) => {
 const selectedLocation = computed(() => {
   for (const contour of props.contours) {
     for (const server of contour.servers) {
+      if (server.rooms.includes(selectedRoom.value)) {
+        return { contourId: contour.id, serverId: server.id, screenId: server.activeScreenId }
+      }
       for (const screen of server.screens) {
         if (screen.rooms.some((room) => room.name === selectedRoom.value)) {
           return {
