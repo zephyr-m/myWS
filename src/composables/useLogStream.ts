@@ -38,6 +38,11 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
       return
     }
 
+    if (event.type === 'clear') {
+      logsByRoom[event.payload.room] = []
+      return
+    }
+
     const roomLogs = logsByRoom[event.payload.room] ?? []
     roomLogs.push(event.payload)
     logsByRoom[event.payload.room] = roomLogs
@@ -68,6 +73,11 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
     socket.addEventListener('error', () => socket?.close())
   }
 
+  async function clearHistory(room: string) {
+    const response = await fetch(`/api/logs?room=${encodeURIComponent(room)}`, { method: 'DELETE' })
+    if (!response.ok) throw new Error('Не удалось очистить историю комнаты')
+  }
+
   async function deleteRoom(room: string) {
     const response = await fetch(`/api/rooms?room=${encodeURIComponent(room)}`, {
       method: 'DELETE',
@@ -85,5 +95,5 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
     socket?.close()
   })
 
-  return { connected, deleteRoom, logsByRoom, rooms }
+  return { connected, clearHistory, deleteRoom, logsByRoom, rooms }
 }

@@ -27,6 +27,7 @@ export interface LogServer {
   id: string
   name: string
   rooms: string[]
+  pinnedRoomTabs: string[]
   roomTabs: string[]
   activeRoomTab: string | null
   screens: LogScreen[]
@@ -60,6 +61,7 @@ function createServer(name: string, screens: LogScreen[] = [mainScreen()]): LogS
     id: makeId('server'),
     name,
     rooms: [...new Set(screens.flatMap((screen) => screen.rooms.map((room) => room.name)))],
+    pinnedRoomTabs: [],
     roomTabs: [],
     activeRoomTab: null,
     screens,
@@ -123,6 +125,7 @@ function normalizeHierarchy(contours: LogContour[]) {
         return true
       })
       server.roomTabs = [...new Set(Array.isArray(server.roomTabs) ? server.roomTabs.filter((room) => typeof room === 'string') : [])]
+      server.pinnedRoomTabs = [...new Set(Array.isArray(server.pinnedRoomTabs) ? server.pinnedRoomTabs.filter((room) => server.roomTabs.includes(room)) : [])]
       if (!server.roomTabs.includes(server.activeRoomTab ?? '')) server.activeRoomTab = server.roomTabs[0] ?? null
 
       const screenIds = new Set(server.screens.map((screen) => screen.id))
@@ -264,7 +267,17 @@ export function useScreens() {
     target.server.activeRoomTab = room
   }
 
-  function closeRoomTab(room: string, server = activeServer.value) {
+  function toggleRoomPin(room: string) {
+    const server = activeServer.value
+    if (!server.roomTabs.includes(room)) return
+    server.pinnedRoomTabs = server.pinnedRoomTabs.includes(room)
+      ? server.pinnedRoomTabs.filter((name) => name !== room)
+      : [...server.pinnedRoomTabs, room]
+  }
+
+  function closeRoomTab(room: string, server = activeServer.value, force = false) {
+    if (!force && server.pinnedRoomTabs.includes(room)) return
+    server.pinnedRoomTabs = server.pinnedRoomTabs.filter((name) => name !== room)
     const index = server.roomTabs.indexOf(room)
     if (index < 0) return
     server.roomTabs.splice(index, 1)
@@ -280,7 +293,7 @@ export function useScreens() {
       for (const server of contour.servers) {
         if (server.id === serverId) continue
         server.rooms = server.rooms.filter((name) => name !== room)
-        closeRoomTab(room, server)
+        closeRoomTab(room, server, true)
         for (const screen of server.screens) {
           screen.rooms = screen.rooms.filter((entry) => entry.name !== room)
           if (screen.activeRoom === room) screen.activeRoom = null
@@ -400,6 +413,7 @@ export function useScreens() {
   }
 
   return {
+    toggleRoomPin,
     openRoomTab,
     closeRoomTab,
     assignRoom,

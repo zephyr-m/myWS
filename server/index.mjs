@@ -281,6 +281,20 @@ async function serveFile(request, response) {
   }
 
   if (requestUrl.pathname === '/api/logs') {
+    if (request.method === 'DELETE') {
+      const room = requestUrl.searchParams.get('room')?.trim().slice(0, 64)
+      if (!room) {
+        sendJson(response, 400, { error: 'Room is required' })
+        return
+      }
+      if (roomHistory.has(room)) roomHistory.set(room, [])
+      // Send the reset before awaiting disk I/O so later logs stay visible.
+      broadcast({ type: 'clear', payload: { room } })
+      await compactHistory()
+      broadcastRooms()
+      sendJson(response, 200, { room })
+      return
+    }
     if (request.method !== 'POST') {
       sendJson(response, 405, { error: 'Method not allowed' })
       return

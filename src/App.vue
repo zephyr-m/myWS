@@ -75,9 +75,10 @@ const {
   toggleNotification,
   toggleRoomNotifications,
 } = useEventFilters()
-const { connected, deleteRoom: deleteRoomFromPool, logsByRoom, rooms } = useLogStream(notifyAboutLog)
+const { connected, clearHistory, deleteRoom: deleteRoomFromPool, logsByRoom, rooms } = useLogStream(notifyAboutLog)
 const { firstUnreadIndex, markReadThrough } = useReadState()
 const {
+  toggleRoomPin,
   openRoomTab,
   closeRoomTab,
   assignRoom,
@@ -224,6 +225,21 @@ function toggleRoomSize(room: OpenRoom) {
   else if (canMakeFull(room)) room.size = 'full'
 }
 
+function markAllRead(room: string) {
+  const logs = logsByRoom[room] ?? []
+  const last = logs.at(-1)
+  if (last) markReadThrough(room, last, logs)
+}
+
+async function clearRoomHistory(room: string) {
+  if (!window.confirm(`Очистить историю комнаты «${room}» для всех клиентов? Сообщения будут удалены без возможности восстановления.`)) return
+  try {
+    await clearHistory(room)
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : 'Не удалось очистить историю')
+  }
+}
+
 function readThrough(room: string, log: LogEntry) {
   markReadThrough(room, log, visibleLogsByRoom.value[room] ?? [])
 }
@@ -345,6 +361,10 @@ function selectCurrentScreen(screenId: string) {
       <RoomTabs
         v-if="viewMode === 'rooms'"
         :rooms="activeServer.roomTabs"
+        :pinned-rooms="activeServer.pinnedRoomTabs"
+        @pin="toggleRoomPin"
+        @read-all="markAllRead"
+        @clear="clearRoomHistory"
         :active-room="activeServer.activeRoomTab"
         :unread-by-room="unreadByRoom"
         @select="openRoomTab($event)"
