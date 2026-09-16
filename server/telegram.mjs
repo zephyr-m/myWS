@@ -29,7 +29,8 @@ export function telegramText(entry, event, error) {
     text = escapeHtml(text)
     return tag ? `<${tag}>${text}</${tag}>` : text
   }
-  const header = block(`${error ? '🔴 Ошибка' : '🔵 Уведомление'} · ${event}`, 'b')
+  const label = error && typeof error === 'object' ? `● ${error.name}` : error ? '🔴 Ошибка' : '🔵 Уведомление'
+  const header = block(`${label} · ${event}`, 'b')
   const location = block(`Комната: ${entry.room}`)
   const source = entry.sourceRoom && entry.sourceRoom !== entry.room
     ? block(`Источник: ${entry.sourceRoom}`) : ''

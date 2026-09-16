@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sumKindCounts, type KindCounts } from '@/lib/event-types'
 import UnreadBadges from '@/components/UnreadBadges.vue'
 import { computed, ref, watch } from 'vue'
 import { Bug, Settings, Trash2 } from '@lucide/vue'
@@ -19,11 +20,9 @@ const props = withDefaults(defineProps<{
   viewMode?: 'rooms' | 'screens'
   mode?: 'dashboard' | 'events'
   rooms: RoomSummary[]
-  errorsByRoom?: Record<string, number>
-  unreadByRoom: Record<string, number>
+  unreadByRoom: Record<string, KindCounts>
 }>(), {
   eventStatsByRoom: () => ({}),
-  errorsByRoom: () => ({}),
   mode: 'dashboard',
   viewMode: 'screens',
 })
@@ -134,16 +133,12 @@ function unplacedRooms(server: LogServer) {
   return server.rooms.filter((room) => !placed.has(room))
 }
 
-function screenUnread(screen: LogScreen, errors = false) {
-  return screen.rooms.reduce((total, room) => total + ((errors ? props.errorsByRoom : props.unreadByRoom)[room.name] ?? 0), 0)
+function screenUnread(screen: LogScreen) {
+  return sumKindCounts(screen.rooms.map((room) => room.name), props.unreadByRoom)
 }
-
-function serverUnread(server: LogServer, errors = false) {
-  return server.rooms.reduce((total, room) => total + ((errors ? props.errorsByRoom : props.unreadByRoom)[room] ?? 0), 0)
-}
-
-function contourUnread(contour: LogContour, errors = false) {
-  return contour.servers.reduce((total, server) => total + serverUnread(server, errors), 0)
+function serverUnread(server: LogServer) { return sumKindCounts(server.rooms, props.unreadByRoom) }
+function contourUnread(contour: LogContour) {
+  return sumKindCounts(contour.servers.flatMap((server) => server.rooms), props.unreadByRoom)
 }
 
 function serverOnline(server: LogServer) {
@@ -239,7 +234,7 @@ function startResize(event: PointerEvent) {
             >
               {{ contour.name }}
             </button>
-            <UnreadBadges v-if="mode === 'dashboard'" :normal="contourUnread(contour)" :errors="contourUnread(contour, true)" />
+            <UnreadBadges v-if="mode === 'dashboard'" :counts="contourUnread(contour)" />
             <button
               v-if="mode === 'dashboard'"
               type="button"
@@ -286,7 +281,7 @@ function startResize(event: PointerEvent) {
                   class="mr-1 size-1.5 shrink-0 rounded-full bg-emerald-500"
                   title="Есть подключенные комнаты"
                 />
-                <UnreadBadges v-if="mode === 'dashboard'" :normal="serverUnread(server)" :errors="serverUnread(server, true)" />
+                <UnreadBadges v-if="mode === 'dashboard'" :counts="serverUnread(server)" />
                 <button
                   v-if="mode === 'dashboard'"
                   type="button"
@@ -321,7 +316,7 @@ function startResize(event: PointerEvent) {
                         {{ eventStatsByRoom[room]?.enabled ?? 0 }}/{{ eventStatsByRoom[room]?.total ?? 0 }}
                         · 🔔 {{ eventStatsByRoom[room]?.notifications ?? 0 }}/{{ eventStatsByRoom[room]?.total ?? 0 }}
                       </span>
-                      <UnreadBadges v-if="mode === 'dashboard'" :normal="unreadByRoom[room]" :errors="errorsByRoom[room]" />
+                      <UnreadBadges v-if="mode === 'dashboard'" :counts="unreadByRoom[room]" />
                       <span v-if="(roomByName.get(room)?.producers ?? 0) > 0" class="size-1.5 rounded-full bg-emerald-500" />
                     </button>
                     <a v-if="mode === 'dashboard'" :href="eventSettingsUrl(room)" class="grid size-7 place-items-center"
@@ -351,7 +346,7 @@ function startResize(event: PointerEvent) {
                     >
                       {{ screen.name }}
                     </button>
-                    <UnreadBadges v-if="mode === 'dashboard'" :normal="screenUnread(screen)" :errors="screenUnread(screen, true)" />
+                    <UnreadBadges v-if="mode === 'dashboard'" :counts="screenUnread(screen)" />
                     <button
                       v-if="mode === 'dashboard' && screen.id !== 'main'"
                       type="button"
@@ -396,7 +391,7 @@ function startResize(event: PointerEvent) {
                       >
                         <span class="text-muted-foreground">#</span>
                         <span class="min-w-0 flex-1 truncate">{{ room.name }}</span>
-                        <UnreadBadges v-if="mode === 'dashboard'" :normal="unreadByRoom[room.name]" :errors="errorsByRoom[room.name]" />
+                        <UnreadBadges v-if="mode === 'dashboard'" :counts="unreadByRoom[room.name]" />
                         <span
                           v-if="(roomByName.get(room.name)?.producers ?? 0) > 0"
                           class="size-1.5 shrink-0 rounded-full bg-emerald-500"
@@ -482,7 +477,7 @@ function startResize(event: PointerEvent) {
             {{ eventStatsByRoom[room.name]?.enabled ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
             · 🔔 {{ eventStatsByRoom[room.name]?.notifications ?? 0 }}/{{ eventStatsByRoom[room.name]?.total ?? 0 }}
           </span>
-          <UnreadBadges v-if="mode === 'dashboard'" :normal="unreadByRoom[room.name]" :errors="errorsByRoom[room.name]" />
+          <UnreadBadges v-if="mode === 'dashboard'" :counts="unreadByRoom[room.name]" />
           <span
             v-if="room.producers > 0"
             class="size-1.5 shrink-0 rounded-full bg-emerald-500"
@@ -518,6 +513,7 @@ function startResize(event: PointerEvent) {
     </ScrollArea>
 
     <footer class="m-2 grid gap-1">
+      <a href="/event-types" class="rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted">Типы событий</a>
       <a
         :href="mode === 'events' ? '/' : '/events'"
         class="rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"

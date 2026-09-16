@@ -74,6 +74,13 @@ try {
     assert.equal(event.payload.count, 2)
     assert.equal(event.payload.times.length, 2)
   }
+  const eventTypes = { types: [
+    { id: 'info', name: 'Уведомление', color: '#0ea5e9', sound: 'normal', volume: 0.5 },
+    { id: 'custom', name: 'Проверить', color: '#eab308', sound: 'beep', volume: 0.3 },
+  ], assignments: { '["origin","failure"]': 'custom' } }
+  const savedTypes = await fetch(`${base}/api/settings`, { method: 'PATCH',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify({ eventTypes }) })
+  assert.equal(savedTypes.status, 200)
   const telegramBefore = await (await fetch(`${base}/api/telegram`)).json()
   assert.equal(telegramBefore.configured, false)
   assert.deepEqual(telegramBefore.events, [])
@@ -99,6 +106,8 @@ try {
   assert.equal((await update).payload.count, 3)
   assert.equal(snapshot.payload.logs['keep-me'][0].message, 'keep')
   assert.equal(snapshot.payload.logs.destination[0].sourceRoom, 'origin')
+  const restoredSettings = await (await fetch(`${base}/api/settings`)).json()
+  assert.deepEqual(restoredSettings.eventTypes, eventTypes)
   const telegramAfter = await (await fetch(`${base}/api/telegram`)).json()
   assert.deepEqual(telegramAfter.events, [{ room: 'destination', event: 'failure' }])
   assert.equal(telegramAfter.pending, 0)

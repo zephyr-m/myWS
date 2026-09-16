@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useEventKinds } from '@/composables/useEventKinds'
+import EventTypesPage from '@/components/EventTypesPage.vue'
+import { playKindSound, type KindCounts } from '@/lib/event-types'
 import ChannelPanel from '@/components/ChannelPanel.vue'
 import DocsPage from '@/components/DocsPage.vue'
 import EventSettings from '@/components/EventSettings.vue'
@@ -22,6 +24,7 @@ import type {
 } from '@/composables/useScreens'
 
 const isDocsPage = window.location.pathname === '/docs'
+const isTypesPage = window.location.pathname === '/event-types'
 const isEventsPage = window.location.pathname === '/events'
 let notificationAudio: AudioContext | null = null
 
@@ -45,29 +48,13 @@ async function enableNotificationSound() {
   }
 }
 
-function playNotificationSound(error: boolean) {
-  if (!notificationAudio || notificationAudio.state !== 'running') return
-  const oscillator = notificationAudio.createOscillator()
-  const gain = notificationAudio.createGain()
-  const now = notificationAudio.currentTime + 0.03
-  const duration = error ? 0.25 : 0.14
-  oscillator.frequency.setValueAtTime(error ? 740 : 720, now)
-  oscillator.frequency.exponentialRampToValueAtTime(error ? 540 : 960, now + (error ? duration : 0.09))
-  gain.gain.setValueAtTime(error ? 0 : 0.06, now)
-  if (error) gain.gain.linearRampToValueAtTime(0.2, now + 0.06)
-  gain.gain.exponentialRampToValueAtTime(error ? 0.0005 : 0.001, now + duration)
-  oscillator.connect(gain).connect(notificationAudio.destination)
-  oscillator.start(now)
-  oscillator.stop(now + duration)
-  oscillator.onended = () => {
-    oscillator.disconnect()
-    gain.disconnect()
-  }
+function playNotificationSound(kind: ReturnType<typeof kindForLog>) {
+  if (notificationAudio) playKindSound(notificationAudio, kind)
 }
 
 async function testNotificationSound() {
   await enableNotificationSound()
-  playNotificationSound(true)
+  playNotificationSound(types.value.find((kind) => kind.id === 'error') ?? types.value[0]!)
 }
 
 function activateNotifications() {
@@ -80,7 +67,7 @@ function activateNotifications() {
 function notifyAboutLog(log: LogEntry) {
   const message = parseLogMessage(log.message)
   if (isEventEnabled(log.room, message.event)) {
-    try { playNotificationSound(isErrorLog(log)) }
+    try { playNotificationSound(kindForLog(log)) }
     catch (error) {
       soundError.value = 'Не удалось воспроизвести звук. Нажмите «Проверить звук».'
       console.warn('Notification sound failed', error)
@@ -101,7 +88,7 @@ function notifyAboutLog(log: LogEntry) {
   }
 }
 
-if (!isDocsPage && !isEventsPage) {
+if (!isDocsPage && !isEventsPage && !isTypesPage) {
   window.addEventListener('click', activateNotifications, true)
   window.addEventListener('keydown', activateNotifications, true)
 }
@@ -121,7 +108,7 @@ const {
 } = useEventFilters()
 const { connected, clearHistory, deleteRoom: deleteRoomFromPool, logsByRoom, rooms } = useLogStream(notifyAboutLog)
 const { firstUnreadIndex, markReadThrough } = useReadState()
-const { isErrorLog } = useEventKinds()
+const { types, kindForLog } = useEventKinds()
 const {
   toggleRoomPin,
   openRoomTab,
@@ -172,16 +159,17 @@ const visibleLogsByRoom = computed(() => Object.fromEntries(
     logs.filter((log) => isEventEnabled(room, parseLogMessage(log.message).event)),
   ]),
 ))
-const unreadCounts = computed(() => Object.fromEntries(
+const unreadByRoom = computed<Record<string, KindCounts>>(() => Object.fromEntries(
   rooms.value.map(({ name }) => {
     const logs = visibleLogsByRoom.value[name] ?? []
-    const unread = logs.slice(firstUnreadIndex(name, logs))
-    const errors = unread.filter(isErrorLog).length
-    return [name, { normal: unread.length - errors, errors }]
+    const counts: KindCounts = {}
+    for (const log of logs.slice(firstUnreadIndex(name, logs))) {
+      const id = kindForLog(log).id
+      counts[id] = (counts[id] ?? 0) + 1
+    }
+    return [name, counts]
   }),
 ))
-const unreadByRoom = computed(() => Object.fromEntries(Object.entries(unreadCounts.value).map(([room, counts]) => [room, counts.normal])))
-const errorsByRoom = computed(() => Object.fromEntries(Object.entries(unreadCounts.value).map(([room, counts]) => [room, counts.errors])))
 
 const viewMode = ref<'rooms' | 'screens'>(localStorage.getItem('live-logs.view-mode') === 'screens' ? 'screens' : 'rooms')
 watch(viewMode, (mode) => {
@@ -360,6 +348,7 @@ function selectCurrentScreen(screenId: string) {
 
 <template>
   <DocsPage v-if="isDocsPage" />
+  <EventTypesPage v-else-if="isTypesPage" />
 
   <EventSettings
     v-else-if="isEventsPage"
@@ -391,7 +380,6 @@ function selectCurrentScreen(screenId: string) {
       :contours="contours"
       :rooms="rooms"
       :unread-by-room="unreadByRoom"
-        :errors-by-room="errorsByRoom"
       @create-contour="createContour"
       @create-screen="createScreen"
       @create-server="createServer"
@@ -430,7 +418,6 @@ function selectCurrentScreen(screenId: string) {
         @clear="clearRoomHistory"
         :active-room="activeServer.activeRoomTab"
         :unread-by-room="unreadByRoom"
-        :errors-by-room="errorsByRoom"
         @select="openRoomTab($event)"
         @close="closeRoomTab($event)"
       />
@@ -439,7 +426,6 @@ function selectCurrentScreen(screenId: string) {
         :active-screen-id="previewRoom ? '' : activeScreenId"
         :screens="openScreens"
         :unread-by-room="unreadByRoom"
-        :errors-by-room="errorsByRoom"
         @close="closeScreenTab"
         @select="selectCurrentScreen"
       />

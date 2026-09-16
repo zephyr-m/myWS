@@ -80,3 +80,7 @@ const visible = longHtml.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/
 assert.ok(visible.length <= 4096)
 assert.ok(visible.includes('Сообщение сокращено'))
 console.log('Telegram HTML: escaping, code blocks and safe truncation passed')
+
+const customType = telegramText({ room: 'r', at: 'now', message: 'body' }, 'event', { name: 'Проверить <это>' })
+assert.ok(customType.includes('Проверить &lt;это&gt;'))
+console.log('Telegram custom event type label passed')

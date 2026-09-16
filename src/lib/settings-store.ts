@@ -1,7 +1,10 @@
+import type { EventTypeSettings } from '@/lib/event-types'
+
 export interface ServerSettings {
   activeContourId?: string
   enabledNotificationEvents?: Record<string, string[]>
   enabledNotificationRooms?: string[]
+  eventTypes?: EventTypeSettings
   errorEvents?: Record<string, string[]>
   eventFilters?: Record<string, string[]>
   hierarchy?: unknown

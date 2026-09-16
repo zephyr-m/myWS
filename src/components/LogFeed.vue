@@ -18,7 +18,7 @@ const emit = defineEmits<{
   readThrough: [log: LogEntry]
 }>()
 
-const { isErrorLog } = useEventKinds()
+const { kindForLog } = useEventKinds()
 const viewport = ref<HTMLElement | null>(null)
 const copiedLogId = ref<string | null>(null)
 const unreadCount = computed(() => props.logs.length - props.firstUnreadIndex)
@@ -192,11 +192,11 @@ function parseStructuredMessage(rawMessage: string) {
             :data-log-index="index"
             :data-unread="index >= firstUnreadIndex"
             class="flex items-end gap-2 border-l-2 pl-2"
-            :class="isErrorLog(log) ? 'border-red-500' : index >= firstUnreadIndex ? 'border-sky-500' : 'border-transparent'"
+            :style="{ borderColor: index >= firstUnreadIndex ? kindForLog(log).color : 'transparent' }"
           >
             <div
               class="relative min-w-0 max-w-[90%] rounded-2xl rounded-bl-sm px-3.5 py-2.5 pr-9"
-              :class="isErrorLog(log) ? 'bg-red-500/10' : index >= firstUnreadIndex ? 'bg-sky-500/10' : 'bg-muted'"
+              :style="{ backgroundColor: kindForLog(log).color + '18' }"
             >
               <button
                 type="button"
@@ -207,7 +207,7 @@ function parseStructuredMessage(rawMessage: string) {
                 <Check v-if="copiedLogId === log.id" class="size-3.5 text-emerald-500" />
                 <Copy v-else class="size-3.5" />
               </button>
-              <span class="mb-1.5 flex min-w-0 items-center gap-1 font-mono text-sm font-semibold" :class="isErrorLog(log) ? 'text-red-600 dark:text-red-400' : 'text-sky-600 dark:text-sky-400'">
+              <span class="mb-1.5 flex min-w-0 items-center gap-1 font-mono text-sm font-semibold" :style="{ color: kindForLog(log).color }">
                 <span class="truncate">{{ parseLogMessage(log.message).event }}</span>
                 <a :href="eventSettingsUrl(log)" class="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground"
                   :aria-label="`Настроить событие ${parseLogMessage(log.message).event}`" title="Настроить событие" @pointerdown.stop @click.stop>

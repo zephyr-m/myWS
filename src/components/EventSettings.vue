@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import type { KindCounts } from '@/lib/event-types'
 import { useTelegram } from '@/composables/useTelegram'
 import { useEventKinds } from '@/composables/useEventKinds'
 import { useEventRoutes } from '@/composables/useEventRoutes'
@@ -24,7 +25,14 @@ const props = defineProps<{
 }>()
 
 const telegram = useTelegram()
-const { errorEvents, isErrorEvent, setErrorEvent } = useEventKinds()
+const { types, assignments, kindForEvent, setEventKind } = useEventKinds()
+const assignedEvents = computed(() => Object.keys(assignments.value).flatMap((key) => {
+  try {
+    const pair: unknown = JSON.parse(key)
+    return Array.isArray(pair) && pair.length === 2 && pair.every((value) => typeof value === 'string')
+      ? [{ room: pair[0] as string, event: pair[1] as string }] : []
+  } catch { return [] }
+}))
 const { routes, busy, error, loaded, setRoute } = useEventRoutes()
 
 const query = new URLSearchParams(window.location.search)
@@ -45,13 +53,13 @@ function focusLinkedRow(element: unknown) {
   })
 }
 const selectedRoom = ref(requestedRoom)
-const noUnread: Record<string, number> = {}
+const noUnread: Record<string, KindCounts> = {}
 const roomNames = computed(() => [...new Set([
   ...props.contours.flatMap((contour) => contour.servers.flatMap((server) =>
     server.rooms,
   )),
   ...props.rooms.map((room) => room.name),
-  ...Object.keys(errorEvents.value),
+  ...assignedEvents.value.map((item) => item.room),
   ...telegram.state.value.events.map((item) => item.room),
   ...routes.value.flatMap((rule) => [rule.source, rule.target]),
   ...(linkedRoom && linkedEvent !== null ? [linkedRoom] : []),
@@ -64,7 +72,7 @@ function eventRows(room: string) {
   const rows = new Map<string, { source: string; event: string }>()
   const add = (source: string, event: string) => rows.set(JSON.stringify([source, event]), { source, event })
   for (const item of telegram.state.value.events) { if (item.room === room) add(room, item.event) }
-  for (const event of errorEvents.value[room] ?? []) add(room, event)
+  for (const item of assignedEvents.value) { if (item.room === room) add(room, item.event) }
   for (const log of props.logsByRoom[room] ?? []) add(log.sourceRoom ?? room, parseLogMessage(log.message).event)
   if (room === linkedRoom && linkedEvent !== null) add(linkedSource, linkedEvent)
   for (const rule of routes.value) {
@@ -229,11 +237,10 @@ function toggleAllEvents() {
             >
               <span class="truncate font-mono text-sm">{{ row.event }}</span>
               <select class="rounded border bg-background px-2 py-1.5 text-xs"
-                :value="isErrorEvent(row.source, row.event) ? 'error' : 'info'"
+                :value="kindForEvent(row.source, row.event).id"
                 :aria-label="`Тип события ${row.event} из ${row.source}`"
-                @change="setErrorEvent(row.source, row.event, ($event.target as HTMLSelectElement).value === 'error')">
-                <option value="info">Уведомление</option>
-                <option value="error">Ошибка</option>
+                @change="setEventKind(row.source, row.event, ($event.target as HTMLSelectElement).value)">
+                <option v-for="kind in types" :key="kind.id" :value="kind.id">{{ kind.name }}</option>
               </select>
               <span class="truncate text-xs text-muted-foreground" :title="row.source">{{ row.source }}</span>
               <div class="flex min-w-0 items-center gap-1">

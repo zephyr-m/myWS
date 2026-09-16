@@ -187,7 +187,9 @@ function appendLog(room, message) {
   if (isNewRoom) broadcastRooms()
   broadcast({ type: previous ? 'update' : 'log', payload: entry })
   if (telegramEnabled(room, event)) {
-    telegram.enqueue(telegramText(entry, event, runtimeSettings.errorEvents?.[sourceRoom]?.includes(event)),
+    const typeId = runtimeSettings.eventTypes?.assignments?.[JSON.stringify([sourceRoom, event])] ?? 'info'
+    const kind = runtimeSettings.eventTypes?.types?.find((type) => type.id === typeId)
+    telegram.enqueue(telegramText(entry, event, kind ?? runtimeSettings.errorEvents?.[sourceRoom]?.includes(event)),
       () => telegramEnabled(room, event))
   }
   return entry

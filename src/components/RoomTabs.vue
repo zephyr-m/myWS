@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { type KindCounts } from '@/lib/event-types'
 import UnreadBadges from '@/components/UnreadBadges.vue'
 import { computed, ref } from 'vue'
 import { Pin, Ellipsis } from '@lucide/vue'
@@ -6,8 +7,7 @@ const props = defineProps<{
   rooms: string[]
   pinnedRooms: string[]
   activeRoom: string | null
-  errorsByRoom: Record<string, number>
-  unreadByRoom: Record<string, number>
+  unreadByRoom: Record<string, KindCounts>
 }>()
 defineEmits<{
   select: [room: string]; close: [room: string]; pin: [room: string]
@@ -33,7 +33,7 @@ function showMenu(room: string) {
       <button type="button" class="flex min-w-0 flex-1 items-center gap-2 py-2 pl-3 text-xs" :title="room"
         :aria-current="activeRoom === room ? 'page' : undefined" @click="$emit('select', room)">
         <span class="truncate"># {{ room }}</span>
-        <UnreadBadges :normal="unreadByRoom[room]" :errors="errorsByRoom[room]" />
+        <UnreadBadges :counts="unreadByRoom[room]" />
       </button>
       <button type="button" class="ml-1 grid size-6 shrink-0 place-items-center rounded hover:bg-muted"
         :class="pinnedRooms.includes(room) ? 'text-sky-500' : 'text-muted-foreground'"
