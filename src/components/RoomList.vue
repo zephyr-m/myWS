@@ -27,6 +27,8 @@ const props = withDefaults(defineProps<{
   viewMode: 'screens',
 })
 
+const totalUnread = computed(() => sumKindCounts(Object.keys(props.unreadByRoom), props.unreadByRoom))
+
 defineEmits<{
   'update:viewMode': [mode: 'rooms' | 'screens']
   selectServerRoom: [serverId: string, room: string]
@@ -179,11 +181,14 @@ function startResize(event: PointerEvent) {
     >
       <span class="mx-auto block h-full w-px bg-transparent group-hover:bg-sky-500/60" />
     </div>
-    <header class="flex h-16 shrink-0 items-center gap-2 px-4">
+    <header class="flex min-h-16 shrink-0 items-center gap-2 px-4 py-3">
       <Bug class="size-4 shrink-0 text-sky-500" />
-      <span class="min-w-0 flex-1 truncate text-sm font-semibold">
-        {{ mode === 'events' ? 'Настройка событий' : 'Live Debug' }}
-      </span>
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+        <span class="text-sm font-semibold">
+          {{ mode === 'events' ? 'Настройка событий' : 'Live Debug' }}
+        </span>
+        <UnreadBadges v-if="mode === 'dashboard'" class="min-w-0 max-w-full" :counts="totalUnread" />
+      </div>
       <span
         class="size-2 shrink-0 rounded-full"
         :class="connected ? 'bg-emerald-500' : 'bg-muted-foreground/40'"
