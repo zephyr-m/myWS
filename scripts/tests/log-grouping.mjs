@@ -8,7 +8,7 @@ const events = []
 const history = new Map()
 let id = 0
 const context = vm.createContext({ roomHistory: history, retentionMs: 3600000, historySize: Infinity,
-  sequence: 0, eventRoutes: [], randomUUID: () => String(++id), persistHistoryEntry() {}, broadcastRooms() {},
+  sequence: 0, eventRoutes: [], runtimeSettings: {}, telegram: { enqueue() {} }, telegramText() {}, telegramEnabled: () => false, randomUUID: () => String(++id), persistHistoryEntry() {}, broadcastRooms() {},
   broadcast: (event) => events.push(event) })
 vm.runInContext(source.slice(source.indexOf('function appendLog('), source.indexOf('async function readSettingsFile')), context)
 const old = { id: 'old', room: 'r', message: 'A', at: new Date().toISOString() }

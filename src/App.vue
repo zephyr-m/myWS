@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { useEventKinds } from '@/composables/useEventKinds'
 import ChannelPanel from '@/components/ChannelPanel.vue'
 import DocsPage from '@/components/DocsPage.vue'
 import EventSettings from '@/components/EventSettings.vue'
@@ -24,28 +25,66 @@ const isDocsPage = window.location.pathname === '/docs'
 const isEventsPage = window.location.pathname === '/events'
 let notificationAudio: AudioContext | null = null
 
-function enableNotificationSound() {
-  notificationAudio ??= new AudioContext()
-  void notificationAudio.resume()
-  if ('Notification' in window && Notification.permission === 'default') {
-    void Notification.requestPermission()
+const soundReady = ref(false)
+const soundError = ref('')
+
+async function enableNotificationSound() {
+  try {
+    if (!notificationAudio || notificationAudio.state === 'closed') {
+      notificationAudio = new AudioContext()
+      notificationAudio.onstatechange = () => {
+        soundReady.value = notificationAudio?.state === 'running'
+      }
+    }
+    if (notificationAudio.state !== 'running') await notificationAudio.resume()
+    soundReady.value = notificationAudio.state === 'running'
+    soundError.value = ''
+  } catch (error) {
+    soundError.value = 'Не удалось включить звук. Проверьте разрешения браузера.'
+    console.warn('Failed to enable notification audio', error)
   }
-  window.removeEventListener('pointerdown', enableNotificationSound)
-  window.removeEventListener('keydown', enableNotificationSound)
+}
+
+function playNotificationSound(error: boolean) {
+  if (!notificationAudio || notificationAudio.state !== 'running') return
+  const oscillator = notificationAudio.createOscillator()
+  const gain = notificationAudio.createGain()
+  const now = notificationAudio.currentTime + 0.03
+  const duration = error ? 0.25 : 0.14
+  oscillator.frequency.setValueAtTime(error ? 740 : 720, now)
+  oscillator.frequency.exponentialRampToValueAtTime(error ? 540 : 960, now + (error ? duration : 0.09))
+  gain.gain.setValueAtTime(error ? 0 : 0.06, now)
+  if (error) gain.gain.linearRampToValueAtTime(0.2, now + 0.06)
+  gain.gain.exponentialRampToValueAtTime(error ? 0.0005 : 0.001, now + duration)
+  oscillator.connect(gain).connect(notificationAudio.destination)
+  oscillator.start(now)
+  oscillator.stop(now + duration)
+  oscillator.onended = () => {
+    oscillator.disconnect()
+    gain.disconnect()
+  }
+}
+
+async function testNotificationSound() {
+  await enableNotificationSound()
+  playNotificationSound(true)
+}
+
+function activateNotifications() {
+  void enableNotificationSound()
+  if ('Notification' in window && Notification.permission === 'default') {
+    void Notification.requestPermission().catch((error) => console.warn('Notification permission request failed', error))
+  }
 }
 
 function notifyAboutLog(log: LogEntry) {
   const message = parseLogMessage(log.message)
-  if (isEventEnabled(log.room, message.event) && notificationAudio?.state === 'running') {
-    const oscillator = notificationAudio.createOscillator()
-    const gain = notificationAudio.createGain()
-    oscillator.frequency.setValueAtTime(720, notificationAudio.currentTime)
-    oscillator.frequency.exponentialRampToValueAtTime(960, notificationAudio.currentTime + 0.09)
-    gain.gain.setValueAtTime(0.06, notificationAudio.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, notificationAudio.currentTime + 0.14)
-    oscillator.connect(gain).connect(notificationAudio.destination)
-    oscillator.start()
-    oscillator.stop(notificationAudio.currentTime + 0.14)
+  if (isEventEnabled(log.room, message.event)) {
+    try { playNotificationSound(isErrorLog(log)) }
+    catch (error) {
+      soundError.value = 'Не удалось воспроизвести звук. Нажмите «Проверить звук».'
+      console.warn('Notification sound failed', error)
+    }
   }
 
   if ('Notification' in window && Notification.permission === 'granted') {
@@ -63,9 +102,14 @@ function notifyAboutLog(log: LogEntry) {
 }
 
 if (!isDocsPage && !isEventsPage) {
-  window.addEventListener('pointerdown', enableNotificationSound)
-  window.addEventListener('keydown', enableNotificationSound)
+  window.addEventListener('click', activateNotifications, true)
+  window.addEventListener('keydown', activateNotifications, true)
 }
+onUnmounted(() => {
+  window.removeEventListener('click', activateNotifications, true)
+  window.removeEventListener('keydown', activateNotifications, true)
+  void notificationAudio?.close()
+})
 
 const {
   isEventEnabled,
@@ -77,6 +121,7 @@ const {
 } = useEventFilters()
 const { connected, clearHistory, deleteRoom: deleteRoomFromPool, logsByRoom, rooms } = useLogStream(notifyAboutLog)
 const { firstUnreadIndex, markReadThrough } = useReadState()
+const { isErrorLog } = useEventKinds()
 const {
   toggleRoomPin,
   openRoomTab,
@@ -127,12 +172,16 @@ const visibleLogsByRoom = computed(() => Object.fromEntries(
     logs.filter((log) => isEventEnabled(room, parseLogMessage(log.message).event)),
   ]),
 ))
-const unreadByRoom = computed(() => Object.fromEntries(
+const unreadCounts = computed(() => Object.fromEntries(
   rooms.value.map(({ name }) => {
     const logs = visibleLogsByRoom.value[name] ?? []
-    return [name, logs.length - firstUnreadIndex(name, logs)]
+    const unread = logs.slice(firstUnreadIndex(name, logs))
+    const errors = unread.filter(isErrorLog).length
+    return [name, { normal: unread.length - errors, errors }]
   }),
 ))
+const unreadByRoom = computed(() => Object.fromEntries(Object.entries(unreadCounts.value).map(([room, counts]) => [room, counts.normal])))
+const errorsByRoom = computed(() => Object.fromEntries(Object.entries(unreadCounts.value).map(([room, counts]) => [room, counts.errors])))
 
 const viewMode = ref<'rooms' | 'screens'>(localStorage.getItem('live-logs.view-mode') === 'screens' ? 'screens' : 'rooms')
 watch(viewMode, (mode) => {
@@ -205,12 +254,18 @@ function closeRoom(room: string) {
   if (activeRoom.value === room) activeRoom.value = null
 }
 
-async function deleteFreeRoom(room: string) {
-  if (!window.confirm(`Удалить свободную комнату «${room}» и её сообщения?`)) return
-
-  await deleteRoomFromPool(room).catch((error: unknown) => {
+async function deleteRoom(room: string) {
+  if (!window.confirm(`Удалить комнату «${room}», её историю и привязки к серверам и экранам?`)) return
+  try {
+    await deleteRoomFromPool(room)
+    releaseRoom(room)
+    for (const contour of contours.value) {
+      for (const server of contour.servers) closeRoomTab(room, server, true)
+    }
+    if (previewRoom.value === room) previewRoom.value = null
+  } catch (error) {
     window.alert(error instanceof Error ? error.message : 'Не удалось удалить комнату')
-  })
+  }
 }
 
 function canMakeFull(room: OpenRoom) {
@@ -336,11 +391,12 @@ function selectCurrentScreen(screenId: string) {
       :contours="contours"
       :rooms="rooms"
       :unread-by-room="unreadByRoom"
+        :errors-by-room="errorsByRoom"
       @create-contour="createContour"
       @create-screen="createScreen"
       @create-server="createServer"
       @delete-contour="removeContour"
-      @delete-room="deleteFreeRoom"
+      @delete-room="deleteRoom"
       @delete-screen="removeScreen"
       @delete-server="removeServer"
       @rename-contour="editContour"
@@ -358,6 +414,13 @@ function selectCurrentScreen(screenId: string) {
     <Separator orientation="vertical" />
 
     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div class="flex items-center justify-end gap-3 border-b px-3 py-1 text-xs text-muted-foreground">
+        <span v-if="soundError" role="status">{{ soundError }}</span>
+        <span v-else-if="!soundReady">Звук ещё не включён браузером</span>
+        <button type="button" class="rounded px-2 py-1 hover:bg-muted" @click="testNotificationSound">
+          {{ soundReady ? 'Проверить звук' : 'Включить и проверить звук' }}
+        </button>
+      </div>
       <RoomTabs
         v-if="viewMode === 'rooms'"
         :rooms="activeServer.roomTabs"
@@ -367,6 +430,7 @@ function selectCurrentScreen(screenId: string) {
         @clear="clearRoomHistory"
         :active-room="activeServer.activeRoomTab"
         :unread-by-room="unreadByRoom"
+        :errors-by-room="errorsByRoom"
         @select="openRoomTab($event)"
         @close="closeRoomTab($event)"
       />
@@ -374,6 +438,8 @@ function selectCurrentScreen(screenId: string) {
         v-else
         :active-screen-id="previewRoom ? '' : activeScreenId"
         :screens="openScreens"
+        :unread-by-room="unreadByRoom"
+        :errors-by-room="errorsByRoom"
         @close="closeScreenTab"
         @select="selectCurrentScreen"
       />

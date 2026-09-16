@@ -2,11 +2,11 @@ import { ref } from 'vue'
 import { loadSettings, saveSettings } from '@/lib/settings-store'
 
 const eventStorageKey = 'live-logs.disabled-events'
-const mutedRoomsStorageKey = 'live-logs.muted-notification-rooms'
-const notificationStorageKey = 'live-logs.disabled-notifications'
+const enabledRoomsStorageKey = 'live-logs.enabled-notification-rooms'
+const notificationStorageKey = 'live-logs.enabled-notifications'
 const disabledByRoom = ref<Record<string, string[]>>(loadFilters(eventStorageKey))
-const disabledNotificationsByRoom = ref<Record<string, string[]>>(loadFilters(notificationStorageKey))
-const mutedNotificationRooms = ref<string[]>(loadRoomList())
+const enabledNotificationsByRoom = ref<Record<string, string[]>>(loadFilters(notificationStorageKey))
+const enabledNotificationRooms = ref<string[]>(loadRoomList())
 let hydrationStarted = false
 let localRevision = 0
 
@@ -20,7 +20,7 @@ function loadFilters(storageKey: string) {
 
 function loadRoomList() {
   try {
-    const rooms: unknown = JSON.parse(localStorage.getItem(mutedRoomsStorageKey) ?? '[]')
+    const rooms: unknown = JSON.parse(localStorage.getItem(enabledRoomsStorageKey) ?? '[]')
     return Array.isArray(rooms) ? rooms.filter((room): room is string => typeof room === 'string') : []
   } catch {
     return []
@@ -28,12 +28,12 @@ function loadRoomList() {
 }
 
 window.addEventListener('storage', (event) => {
-  if (![eventStorageKey, notificationStorageKey, mutedRoomsStorageKey].includes(event.key ?? '')) return
+  if (![eventStorageKey, notificationStorageKey, enabledRoomsStorageKey].includes(event.key ?? '')) return
   if (event.key === eventStorageKey) disabledByRoom.value = loadFilters(eventStorageKey)
   if (event.key === notificationStorageKey) {
-    disabledNotificationsByRoom.value = loadFilters(notificationStorageKey)
+    enabledNotificationsByRoom.value = loadFilters(notificationStorageKey)
   }
-  if (event.key === mutedRoomsStorageKey) mutedNotificationRooms.value = loadRoomList()
+  if (event.key === enabledRoomsStorageKey) enabledNotificationRooms.value = loadRoomList()
   localRevision += 1
 })
 
@@ -57,36 +57,36 @@ export function useEventFilters() {
 
   function isNotificationEnabled(room: string, event: string) {
     return isRoomNotificationEnabled(room)
-      && !disabledNotificationsByRoom.value[room]?.includes(event)
+      && (enabledNotificationsByRoom.value[room]?.includes(event) ?? false)
   }
 
   function isRoomNotificationEnabled(room: string) {
-    return !mutedNotificationRooms.value.includes(room)
+    return enabledNotificationRooms.value.includes(room)
   }
 
   function toggleNotification(room: string, event: string) {
-    const disabled = new Set(disabledNotificationsByRoom.value[room] ?? [])
-    if (disabled.has(event)) disabled.delete(event)
-    else disabled.add(event)
+    const enabled = new Set(enabledNotificationsByRoom.value[room] ?? [])
+    if (enabled.has(event)) enabled.delete(event)
+    else enabled.add(event)
 
-    disabledNotificationsByRoom.value = {
-      ...disabledNotificationsByRoom.value,
-      [room]: [...disabled],
+    enabledNotificationsByRoom.value = {
+      ...enabledNotificationsByRoom.value,
+      [room]: [...enabled],
     }
-    localStorage.setItem(notificationStorageKey, JSON.stringify(disabledNotificationsByRoom.value))
+    localStorage.setItem(notificationStorageKey, JSON.stringify(enabledNotificationsByRoom.value))
     localRevision += 1
-    saveSettings({ notificationFilters: disabledNotificationsByRoom.value })
+    saveSettings({ enabledNotificationEvents: enabledNotificationsByRoom.value })
   }
 
   function toggleRoomNotifications(room: string) {
-    const muted = new Set(mutedNotificationRooms.value)
-    if (muted.has(room)) muted.delete(room)
-    else muted.add(room)
+    const enabled = new Set(enabledNotificationRooms.value)
+    if (enabled.has(room)) enabled.delete(room)
+    else enabled.add(room)
 
-    mutedNotificationRooms.value = [...muted]
-    localStorage.setItem(mutedRoomsStorageKey, JSON.stringify(mutedNotificationRooms.value))
+    enabledNotificationRooms.value = [...enabled]
+    localStorage.setItem(enabledRoomsStorageKey, JSON.stringify(enabledNotificationRooms.value))
     localRevision += 1
-    saveSettings({ mutedNotificationRooms: mutedNotificationRooms.value })
+    saveSettings({ enabledNotificationRooms: enabledNotificationRooms.value })
   }
 
   return {
@@ -113,21 +113,21 @@ function hydrateFilters() {
       saveSettings({ eventFilters: disabledByRoom.value })
     }
 
-    if (settings.notificationFilters) {
-      disabledNotificationsByRoom.value = settings.notificationFilters
+    if (settings.enabledNotificationEvents) {
+      enabledNotificationsByRoom.value = settings.enabledNotificationEvents
       localStorage.setItem(
         notificationStorageKey,
-        JSON.stringify(disabledNotificationsByRoom.value),
+        JSON.stringify(enabledNotificationsByRoom.value),
       )
     } else {
-      saveSettings({ notificationFilters: disabledNotificationsByRoom.value })
+      saveSettings({ enabledNotificationEvents: enabledNotificationsByRoom.value })
     }
 
-    if (settings.mutedNotificationRooms) {
-      mutedNotificationRooms.value = settings.mutedNotificationRooms
-      localStorage.setItem(mutedRoomsStorageKey, JSON.stringify(mutedNotificationRooms.value))
+    if (settings.enabledNotificationRooms) {
+      enabledNotificationRooms.value = settings.enabledNotificationRooms
+      localStorage.setItem(enabledRoomsStorageKey, JSON.stringify(enabledNotificationRooms.value))
     } else {
-      saveSettings({ mutedNotificationRooms: mutedNotificationRooms.value })
+      saveSettings({ enabledNotificationRooms: enabledNotificationRooms.value })
     }
   })
 }

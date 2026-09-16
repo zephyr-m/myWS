@@ -1,3 +1,4 @@
+import { createTelegram, telegramText } from './telegram.mjs'
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { appendFile, copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
@@ -29,6 +30,11 @@ let historyWrite = Promise.resolve()
 let settingsWrite = Promise.resolve()
 let sequence = 0
 let eventRoutes = []
+let runtimeSettings = {}
+const telegram = createTelegram({ token: process.env.TELEGRAM_BOT_TOKEN, chatId: process.env.TELEGRAM_CHAT_ID })
+function telegramEnabled(room, event) {
+  return (runtimeSettings.telegramEvents ?? []).some((entry) => entry.room === room && entry.event === event)
+}
 
 const viewers = new WebSocketServer({ noServer: true })
 const producers = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
@@ -180,6 +186,10 @@ function appendLog(room, message) {
 
   if (isNewRoom) broadcastRooms()
   broadcast({ type: previous ? 'update' : 'log', payload: entry })
+  if (telegramEnabled(room, event)) {
+    telegram.enqueue(telegramText(entry, event, runtimeSettings.errorEvents?.[sourceRoom]?.includes(event)),
+      () => telegramEnabled(room, event))
+  }
   return entry
 }
 
@@ -219,6 +229,7 @@ function updateSettings(patch) {
     if (hasValidPrimary) await copyFile(settingsFile, `${settingsFile}.bak`)
     await writeFile(temporaryFile, `${JSON.stringify(next, null, 2)}\n`)
     await rename(temporaryFile, settingsFile)
+    runtimeSettings = next
     eventRoutes = Array.isArray(next.eventRoutes) ? next.eventRoutes : []
     return next
   })
@@ -260,6 +271,26 @@ async function serveFile(request, response) {
 
   if (requestUrl.pathname === '/api/health') {
     sendJson(response, 200, { status: 'ok' })
+    return
+  }
+
+  if (requestUrl.pathname === '/api/telegram') {
+    if (request.method === 'PUT') {
+      const { room, event, enabled } = await readJsonBody(request)
+      if (typeof room !== 'string' || !room.trim() || room.length > 64
+        || typeof event !== 'string' || !event.trim() || typeof enabled !== 'boolean') {
+        sendJson(response, 400, { error: 'Invalid Telegram setting' })
+        return
+      }
+      await updateSettings((settings) => ({ telegramEvents: [
+        ...(settings.telegramEvents ?? []).filter((item) => item.room !== room || item.event !== event),
+        ...(enabled ? [{ room, event }] : []),
+      ] }))
+    } else if (request.method !== 'GET') {
+      sendJson(response, 405, { error: 'Method not allowed' })
+      return
+    }
+    sendJson(response, 200, { ...telegram.status(), events: runtimeSettings.telegramEvents ?? [] })
     return
   }
 
@@ -433,7 +464,8 @@ producers.on('connection', (socket, request) => {
   })
 })
 
-eventRoutes = (await readSettings()).eventRoutes ?? []
+runtimeSettings = await readSettings()
+eventRoutes = runtimeSettings.eventRoutes ?? []
 await loadHistory()
 await compactHistory()
 

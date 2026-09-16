@@ -18,7 +18,7 @@ let server
 const sockets = []
 async function start() {
   server = spawn(process.execPath, ['server/index.mjs'], {
-    env: { ...process.env, PORT: String(port), LOG_HISTORY_FILE: join(directory, 'logs.jsonl'),
+    env: { ...process.env, TELEGRAM_BOT_TOKEN: '', TELEGRAM_CHAT_ID: '', PORT: String(port), LOG_HISTORY_FILE: join(directory, 'logs.jsonl'),
       SETTINGS_FILE: join(directory, 'settings.json') }, stdio: ['ignore', 'pipe', 'pipe'],
   })
   await new Promise((resolve, reject) => {
@@ -74,6 +74,13 @@ try {
     assert.equal(event.payload.count, 2)
     assert.equal(event.payload.times.length, 2)
   }
+  const telegramBefore = await (await fetch(`${base}/api/telegram`)).json()
+  assert.equal(telegramBefore.configured, false)
+  assert.deepEqual(telegramBefore.events, [])
+  const telegramRule = { room: 'destination', event: 'failure', enabled: true }
+  const telegramResponse = await fetch(`${base}/api/telegram`, { method: 'PUT',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(telegramRule) })
+  assert.equal(telegramResponse.status, 200)
   const route = { source: 'origin', event: 'failure', target: 'destination' }
   const saved = await fetch(`${base}/api/routes`, { method: 'PUT',
     headers: { 'content-type': 'application/json' }, body: JSON.stringify(route) })
@@ -92,6 +99,9 @@ try {
   assert.equal((await update).payload.count, 3)
   assert.equal(snapshot.payload.logs['keep-me'][0].message, 'keep')
   assert.equal(snapshot.payload.logs.destination[0].sourceRoom, 'origin')
+  const telegramAfter = await (await fetch(`${base}/api/telegram`)).json()
+  assert.deepEqual(telegramAfter.events, [{ room: 'destination', event: 'failure' }])
+  assert.equal(telegramAfter.pending, 0)
   const restoredRoutes = await (await fetch(`${base}/api/routes`)).json()
   assert.deepEqual(restoredRoutes, [route])
   const routedUpdate = next(socket, 'update')

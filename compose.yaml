@@ -6,6 +6,8 @@ services:
     environment:
       LOG_HISTORY_FILE: /app/data/logs.jsonl
       LOG_RETENTION_HOURS: 6
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
       PORT: 8081
       SETTINGS_FILE: /app/data/settings.json
     volumes:

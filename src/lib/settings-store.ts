@@ -1,5 +1,8 @@
 export interface ServerSettings {
   activeContourId?: string
+  enabledNotificationEvents?: Record<string, string[]>
+  enabledNotificationRooms?: string[]
+  errorEvents?: Record<string, string[]>
   eventFilters?: Record<string, string[]>
   hierarchy?: unknown
   mutedNotificationRooms?: string[]

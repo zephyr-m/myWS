@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useTelegram } from '@/composables/useTelegram'
+import { useEventKinds } from '@/composables/useEventKinds'
 import { useEventRoutes } from '@/composables/useEventRoutes'
 import EventToggle from '@/components/EventToggle.vue'
 import RoomList from '@/components/RoomList.vue'
@@ -21,9 +23,27 @@ const props = defineProps<{
   toggleRoomNotifications: (room: string) => void
 }>()
 
+const telegram = useTelegram()
+const { errorEvents, isErrorEvent, setErrorEvent } = useEventKinds()
 const { routes, busy, error, loaded, setRoute } = useEventRoutes()
 
-let requestedRoom = new URLSearchParams(window.location.search).get('room') ?? ''
+const query = new URLSearchParams(window.location.search)
+const linkedRoom = query.get('room') ?? ''
+const linkedEvent = query.get('event')
+const linkedSource = query.get('source') ?? linkedRoom
+let requestedRoom = linkedRoom
+let scrolledToEvent = false
+function isLinkedRow(row: { source: string; event: string }) {
+  return selectedRoom.value === linkedRoom && row.source === linkedSource && row.event === linkedEvent
+}
+function focusLinkedRow(element: unknown) {
+  if (!(element instanceof HTMLElement) || scrolledToEvent) return
+  scrolledToEvent = true
+  void nextTick(() => {
+    element.scrollIntoView({ block: 'center', inline: 'nearest' })
+    element.focus({ preventScroll: true })
+  })
+}
 const selectedRoom = ref(requestedRoom)
 const noUnread: Record<string, number> = {}
 const roomNames = computed(() => [...new Set([
@@ -31,7 +51,10 @@ const roomNames = computed(() => [...new Set([
     server.rooms,
   )),
   ...props.rooms.map((room) => room.name),
+  ...Object.keys(errorEvents.value),
+  ...telegram.state.value.events.map((item) => item.room),
   ...routes.value.flatMap((rule) => [rule.source, rule.target]),
+  ...(linkedRoom && linkedEvent !== null ? [linkedRoom] : []),
 ])])
 
 const listedRooms = computed(() => roomNames.value.map((name) =>
@@ -40,7 +63,10 @@ const listedRooms = computed(() => roomNames.value.map((name) =>
 function eventRows(room: string) {
   const rows = new Map<string, { source: string; event: string }>()
   const add = (source: string, event: string) => rows.set(JSON.stringify([source, event]), { source, event })
+  for (const item of telegram.state.value.events) { if (item.room === room) add(room, item.event) }
+  for (const event of errorEvents.value[room] ?? []) add(room, event)
   for (const log of props.logsByRoom[room] ?? []) add(log.sourceRoom ?? room, parseLogMessage(log.message).event)
+  if (room === linkedRoom && linkedEvent !== null) add(linkedSource, linkedEvent)
   for (const rule of routes.value) {
     if (rule.source === room || rule.target === room) add(rule.source, rule.event)
   }
@@ -184,19 +210,31 @@ function toggleAllEvents() {
           </p>
 
           <div v-else class="overflow-x-auto rounded-lg border">
-            <div class="grid min-w-[760px] grid-cols-[minmax(10rem,1fr)_10rem_16rem_5rem_5rem] gap-2 items-center border-b bg-muted/30 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div class="grid min-w-[980px] grid-cols-[minmax(10rem,1fr)_9rem_10rem_16rem_5rem_5rem_5rem] gap-2 items-center border-b bg-muted/30 px-4 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               <span>Событие</span>
+              <span>Тип</span>
               <span>Исходная комната</span>
               <span>Целевая комната</span>
               <span class="text-center">Лента</span>
               <span class="text-center">Push</span>
+              <span class="text-center">Telegram</span>
             </div>
             <div
               v-for="row in rows"
               :key="JSON.stringify([row.source, row.event])"
-              class="grid min-w-[760px] grid-cols-[minmax(10rem,1fr)_10rem_16rem_5rem_5rem] gap-2 items-center border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
+              :ref="(element) => { if (isLinkedRow(row)) focusLinkedRow(element) }"
+              :class="isLinkedRow(row) && 'bg-sky-500/15 ring-2 ring-inset ring-sky-500'"
+              :tabindex="isLinkedRow(row) ? -1 : undefined"
+              class="grid min-w-[980px] grid-cols-[minmax(10rem,1fr)_9rem_10rem_16rem_5rem_5rem_5rem] gap-2 items-center border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
             >
               <span class="truncate font-mono text-sm">{{ row.event }}</span>
+              <select class="rounded border bg-background px-2 py-1.5 text-xs"
+                :value="isErrorEvent(row.source, row.event) ? 'error' : 'info'"
+                :aria-label="`Тип события ${row.event} из ${row.source}`"
+                @change="setErrorEvent(row.source, row.event, ($event.target as HTMLSelectElement).value === 'error')">
+                <option value="info">Уведомление</option>
+                <option value="error">Ошибка</option>
+              </select>
               <span class="truncate text-xs text-muted-foreground" :title="row.source">{{ row.source }}</span>
               <div class="flex min-w-0 items-center gap-1">
                 <select class="min-w-0 flex-1 rounded border bg-background px-2 py-1.5 text-xs"
@@ -224,15 +262,29 @@ function toggleAllEvents() {
                 :label="`Push для ${row.event}`"
                 @toggle="toggleNotification(selectedRoom, row.event)"
               />
+              <EventToggle class="justify-self-center"
+                :checked="telegram.enabled(selectedRoom, row.event)"
+                :disabled="telegram.busy.value || !telegram.loaded.value"
+                :label="`Telegram для ${row.event} в ${selectedRoom}`"
+                @toggle="telegram.toggle(selectedRoom, row.event)" />
             </div>
           </div>
 
+          <p class="mt-3 text-xs text-muted-foreground">
+            Telegram: {{ !telegram.loaded.value ? 'загрузка…' : telegram.state.value.configured ? 'настроен' : 'бот и чат ещё не настроены' }}.
+            По умолчанию выключен. Отправляет новые сообщения и повторы из выбранной комнаты независимо от Ленты и Push.
+            <span v-if="telegram.state.value.pending">В очереди: {{ telegram.state.value.pending }}.</span>
+            <span v-if="telegram.state.value.dropped">Не доставлено: {{ telegram.state.value.dropped }}.</span>
+          </p>
+          <p v-if="telegram.error.value || telegram.state.value.lastError" role="alert" class="mt-2 text-xs text-destructive">
+            {{ telegram.error.value || telegram.state.value.lastError }}
+          </p>
           <p v-if="error" role="alert" class="mt-3 text-sm text-destructive">{{ error }}</p>
           <p v-if="selectedRoom" class="mt-3 text-xs text-muted-foreground">
-            Маршрут применяется к новым сообщениям один раз. Лента и Push относятся к выбранной комнате.
+            Тип события действует и после перенаправления, включая имеющуюся историю. Маршрут применяется к новым сообщениям один раз. Лента и Push относятся к выбранной комнате.
           </p>
           <p v-if="selectedRoom" class="mt-4 text-xs text-muted-foreground">
-            Новые события включаются автоматически, если Push комнаты не отключён.
+            Push по умолчанию выключен. Для уведомлений включите Push комнаты и нужные события.
           </p>
         </section>
       </main>

@@ -29,6 +29,11 @@ function isBranch(value: unknown) {
   return typeof value === 'object' && value !== null && Object.keys(value).length > 0
 }
 
+function isStackTrace(key: string, value: unknown) {
+  return /^(?:стек вызовов|stack[ _-]?trace|trace|stack)$/i.test(key.trim())
+    || (typeof value === 'string' && /^#0\s/.test(value.trim()))
+}
+
 function branchLabel(value: unknown) {
   const count = Object.keys(value as object).length
   return Array.isArray(value) ? `${count} элементов` : `${count} полей`
@@ -56,7 +61,15 @@ function primitiveLabel(value: unknown) {
       :key="item.key"
       class="border-b border-border/60 last:border-b-0"
     >
-      <details v-if="isBranch(item.value)" :open="depth < 1">
+      <details v-if="isStackTrace(item.key, item.value)">
+        <summary class="cursor-pointer select-none px-3 py-1.5 hover:bg-muted/40">
+          <span class="break-words font-medium">{{ item.key }}</span>
+        </summary>
+        <JsonTree v-if="isBranch(item.value)" :depth="depth + 1" :value="item.value" />
+        <pre v-else class="whitespace-pre-wrap break-words px-3 py-2 text-muted-foreground">{{ primitiveLabel(item.value) }}</pre>
+      </details>
+
+      <details v-else-if="isBranch(item.value)" :open="depth < 1">
         <summary class="cursor-pointer select-none px-3 py-1.5 hover:bg-muted/40">
           <span class="break-words font-medium">{{ item.key }}</span>
           <span class="ml-1 text-muted-foreground">· {{ branchLabel(item.value) }}</span>

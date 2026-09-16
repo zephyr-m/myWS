@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import UnreadBadges from '@/components/UnreadBadges.vue'
 import type { LogScreen } from '@/composables/useScreens'
 
 defineProps<{
   activeScreenId: string
   screens: LogScreen[]
+  unreadByRoom: Record<string, number>
+  errorsByRoom: Record<string, number>
 }>()
 
 defineEmits<{
@@ -28,6 +31,9 @@ defineEmits<{
       >
         {{ screen.name }}
       </button>
+      <UnreadBadges
+        :normal="screen.rooms.reduce((sum, room) => sum + (unreadByRoom[room.name] ?? 0), 0)"
+        :errors="screen.rooms.reduce((sum, room) => sum + (errorsByRoom[room.name] ?? 0), 0)" />
       <button
         v-if="screens.length > 1"
         type="button"

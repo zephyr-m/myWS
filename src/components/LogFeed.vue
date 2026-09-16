@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { useEventKinds } from '@/composables/useEventKinds'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Check, Copy, Zap } from '@lucide/vue'
+import { Check, Copy, Settings } from '@lucide/vue'
 import JsonTree from '@/components/JsonTree.vue'
 import { parseLogMessage } from '@/lib/log-events'
 import type { LogEntry } from '@/types'
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   readThrough: [log: LogEntry]
 }>()
 
+const { isErrorLog } = useEventKinds()
 const viewport = ref<HTMLElement | null>(null)
 const copiedLogId = ref<string | null>(null)
 const unreadCount = computed(() => props.logs.length - props.firstUnreadIndex)
@@ -92,6 +94,15 @@ function displayTime(timestamp: string) {
     minute: '2-digit',
     second: '2-digit',
   }).format(new Date(timestamp))
+}
+
+function eventSettingsUrl(log: LogEntry) {
+  const query = new URLSearchParams({
+    room: log.room,
+    source: log.sourceRoom ?? log.room,
+    event: parseLogMessage(log.message).event,
+  })
+  return `/events?${query}`
 }
 
 async function copyMessage(log: LogEntry) {
@@ -181,11 +192,11 @@ function parseStructuredMessage(rawMessage: string) {
             :data-log-index="index"
             :data-unread="index >= firstUnreadIndex"
             class="flex items-end gap-2 border-l-2 pl-2"
-            :class="index >= firstUnreadIndex ? 'border-sky-500' : 'border-transparent'"
+            :class="isErrorLog(log) ? 'border-red-500' : index >= firstUnreadIndex ? 'border-sky-500' : 'border-transparent'"
           >
             <div
               class="relative min-w-0 max-w-[90%] rounded-2xl rounded-bl-sm px-3.5 py-2.5 pr-9"
-              :class="index >= firstUnreadIndex ? 'bg-sky-500/10' : 'bg-muted'"
+              :class="isErrorLog(log) ? 'bg-red-500/10' : index >= firstUnreadIndex ? 'bg-sky-500/10' : 'bg-muted'"
             >
               <button
                 type="button"
@@ -196,9 +207,12 @@ function parseStructuredMessage(rawMessage: string) {
                 <Check v-if="copiedLogId === log.id" class="size-3.5 text-emerald-500" />
                 <Copy v-else class="size-3.5" />
               </button>
-              <span class="mb-1.5 flex min-w-0 items-center gap-1 font-mono text-[11px] font-semibold text-sky-600 dark:text-sky-400">
-                <Zap class="size-3 shrink-0" />
+              <span class="mb-1.5 flex min-w-0 items-center gap-1 font-mono text-sm font-semibold" :class="isErrorLog(log) ? 'text-red-600 dark:text-red-400' : 'text-sky-600 dark:text-sky-400'">
                 <span class="truncate">{{ parseLogMessage(log.message).event }}</span>
+                <a :href="eventSettingsUrl(log)" class="grid size-6 shrink-0 place-items-center rounded text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                  :aria-label="`Настроить событие ${parseLogMessage(log.message).event}`" title="Настроить событие" @pointerdown.stop @click.stop>
+                  <Settings class="size-3.5" />
+                </a>
               </span>
               <details v-if="(log.count ?? 1) > 1" class="mb-2 text-xs text-muted-foreground">
                 <summary class="cursor-pointer text-sky-600">×{{ log.count }} · Последние {{ log.times?.length ?? 0 }} получений</summary>

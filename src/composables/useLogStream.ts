@@ -84,7 +84,7 @@ export function useLogStream(onLog?: (log: LogEntry) => void) {
     const response = await fetch(`/api/rooms?room=${encodeURIComponent(room)}`, {
       method: 'DELETE',
     })
-    if (response.ok) return
+    if (response.ok || response.status === 404) return
     throw new Error(response.status === 409
       ? 'Нельзя удалить комнату: к ней подключён клиент'
       : 'Не удалось удалить комнату')
