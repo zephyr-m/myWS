@@ -64,14 +64,21 @@ function positionAtUnread(smooth = false) {
 }
 
 function markVisibleAsRead() {
-  if (!props.active || !readingArmed || positioning || !viewport.value) return
+  if (document.visibilityState !== 'visible' || !props.active || !readingArmed || positioning || !viewport.value) return
   const bottom = viewport.value.getBoundingClientRect().bottom
-  const visible = [...viewport.value.querySelectorAll<HTMLElement>('[data-log-index]')]
+  const logsById = new Map(props.logs.map((log, index) => [log.id, { log, index }]))
+  const visible = [...viewport.value.querySelectorAll<HTMLElement>('[data-log-id]')]
     .filter((element) => element.getBoundingClientRect().bottom <= bottom + 1)
+    .map((element) => {
+      const entry = logsById.get(element.dataset.logId ?? '')
+      // A repeat can reorder data before Vue updates the DOM. Read only the rendered revision.
+      return entry && element.dataset.logSequence === String(entry.log.sequence ?? '')
+        && element.dataset.logAt === entry.log.at ? entry : undefined
+    })
+    .filter((entry) => entry !== undefined)
     .at(-1)
-  const index = Number(visible?.dataset.logIndex)
-  if (Number.isInteger(index) && index >= props.firstUnreadIndex) {
-    emit('readThrough', props.logs[index])
+  if (visible && visible.index >= props.firstUnreadIndex) {
+    emit('readThrough', visible.log)
   }
 }
 
@@ -189,7 +196,9 @@ function parseStructuredMessage(rawMessage: string) {
             <span class="h-px flex-1 bg-sky-500/40" />
           </div>
           <article
-            :data-log-index="index"
+            :data-log-id="log.id"
+            :data-log-sequence="log.sequence ?? ''"
+            :data-log-at="log.at"
             :data-unread="index >= firstUnreadIndex"
             class="flex items-end gap-2 border-l-2 pl-2"
             :style="{ borderColor: index >= firstUnreadIndex ? kindForLog(log).color : 'transparent' }"
